@@ -44,3 +44,16 @@ Rollback the latest migration:
 
 Stop local services:
 - `docker compose down`
+
+## DB connectivity checklist
+1) Confirm Postgres container is up:
+   - `docker compose ps db`
+2) Verify DB responds inside container:
+   - `docker compose exec db psql -U kanban -d kanban -c "select 1;"`
+3) Verify app env values are present:
+   - `DATABASE_URL` OR all of `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`
+4) Re-run schema/data setup:
+   - `npm run db:migrate`
+   - `npm run db:seed`
+5) Start API with env file:
+   - `npm run dev`

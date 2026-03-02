@@ -5,6 +5,7 @@
 - email (unique)
 - password_hash
 - role: admin|techlead|employee
+- status: active|disabled
 - created_at, updated_at
 
 ## projects
@@ -59,4 +60,3 @@
 - created_at
 
 Миграции: хранить в `apps/api/migrations/` (SQL).
-

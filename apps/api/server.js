@@ -1,132 +1,92 @@
-const http = require('http');
 const crypto = require('crypto');
-const fs = require('fs');
 const path = require('path');
-const { URL } = require('url');
+const express = require('express');
 const { Pool } = require('pg');
 const { verifyPassword } = require('./lib/password');
+const {
+  createDbConfigFromEnv,
+  createDbConnectionInfo,
+} = require('./lib/db-config');
 
 const PORT = Number(process.env.PORT) || 3000;
 const webRoot = path.resolve(__dirname, '..', 'web');
-const SESSION_COOKIE = 'kb_session';
-const SESSION_SECRET = process.env.SESSION_SECRET || 'dev_session_secret';
-const SESSION_TTL_HOURS = Number(process.env.SESSION_TTL_HOURS) || 24;
-const SESSION_TTL_MS = SESSION_TTL_HOURS * 60 * 60 * 1000;
-const MAX_JSON_BODY_BYTES = 1024 * 1024;
+const MAX_JSON_BODY = '1mb';
 const ALL_ROLES = ['admin', 'techlead', 'employee'];
-const sessions = new Map();
-const db = new Pool({
-  connectionString: process.env.DATABASE_URL || undefined,
-});
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret_change_me';
+const JWT_TTL_HOURS = Number(process.env.JWT_TTL_HOURS) || 24;
+const JWT_TTL_SECONDS = JWT_TTL_HOURS * 60 * 60;
+const dbConfigState = createDbConfigFromEnv(process.env);
+const dbConfig = dbConfigState.config;
+const dbConnectionInfo = createDbConnectionInfo(dbConfig);
+const db = new Pool(dbConfig);
 
-const MIME_TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-  '.txt': 'text/plain; charset=utf-8',
-};
+const app = express();
 
 function sendJson(res, statusCode, payload) {
-  const body = JSON.stringify(payload);
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
-  });
-  res.end(body);
+  res.status(statusCode).json(payload);
 }
 
 function sendText(res, statusCode, text) {
-  res.writeHead(statusCode, { 'Content-Type': 'text/plain; charset=utf-8' });
-  res.end(text);
+  res.status(statusCode).type('text/plain; charset=utf-8').send(text);
 }
 
 function sendNoContent(res) {
-  res.writeHead(204);
-  res.end();
-}
-
-function readJsonBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-
-    req.on('data', (chunk) => {
-      body += chunk.toString('utf8');
-      if (Buffer.byteLength(body) > MAX_JSON_BODY_BYTES) {
-        reject(new Error('payload_too_large'));
-        req.destroy();
-      }
-    });
-
-    req.on('end', () => {
-      if (!body) {
-        resolve({});
-        return;
-      }
-
-      try {
-        resolve(JSON.parse(body));
-      } catch (_) {
-        reject(new Error('invalid_json'));
-      }
-    });
-
-    req.on('error', reject);
-  });
-}
-
-function parseCookies(cookieHeader) {
-  const cookies = {};
-  if (!cookieHeader) {
-    return cookies;
-  }
-
-  for (const part of cookieHeader.split(';')) {
-    const trimmed = part.trim();
-    if (!trimmed) {
-      continue;
-    }
-
-    const separatorIndex = trimmed.indexOf('=');
-    if (separatorIndex <= 0) {
-      continue;
-    }
-
-    const key = trimmed.slice(0, separatorIndex).trim();
-    const value = trimmed.slice(separatorIndex + 1).trim();
-    cookies[key] = decodeURIComponent(value);
-  }
-
-  return cookies;
+  res.status(204).end();
 }
 
 function createSignature(value) {
   return crypto
-    .createHmac('sha256', SESSION_SECRET)
+    .createHmac('sha256', JWT_SECRET)
     .update(value)
     .digest('base64url');
 }
 
-function createSessionToken(sessionId) {
-  return `${sessionId}.${createSignature(sessionId)}`;
+function decodeBase64Json(value) {
+  try {
+    return JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+  } catch (_) {
+    return null;
+  }
 }
 
-function getSessionIdFromToken(token) {
-  if (!token || !token.includes('.')) {
+function createJwt(user) {
+  const iat = Math.floor(Date.now() / 1000);
+  const payload = {
+    sub: user.id,
+    email: user.email,
+    role: user.role,
+    status: user.status,
+    iat,
+    exp: iat + JWT_TTL_SECONDS,
+  };
+  const headerPart = Buffer.from(
+    JSON.stringify({ alg: 'HS256', typ: 'JWT' })
+  ).toString('base64url');
+  const payloadPart = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signingInput = `${headerPart}.${payloadPart}`;
+  const signaturePart = createSignature(signingInput);
+  return `${signingInput}.${signaturePart}`;
+}
+
+function verifyJwt(token) {
+  if (!token) {
     return null;
   }
 
-  const [sessionId, signature] = token.split('.', 2);
-  if (!sessionId || !signature) {
+  const parts = token.split('.');
+  if (parts.length !== 3) {
     return null;
   }
 
-  const expected = createSignature(sessionId);
+  const [headerPart, payloadPart, signaturePart] = parts;
+  if (!headerPart || !payloadPart || !signaturePart) {
+    return null;
+  }
+
+  const signingInput = `${headerPart}.${payloadPart}`;
+  const expected = createSignature(signingInput);
   const expectedBuffer = Buffer.from(expected, 'utf8');
-  const actualBuffer = Buffer.from(signature, 'utf8');
+  const actualBuffer = Buffer.from(signaturePart, 'utf8');
 
   if (expectedBuffer.length !== actualBuffer.length) {
     return null;
@@ -136,92 +96,70 @@ function getSessionIdFromToken(token) {
     return null;
   }
 
-  return sessionId;
-}
-
-function setSessionCookie(res, sessionId) {
-  const token = createSessionToken(sessionId);
-  const cookieParts = [
-    `${SESSION_COOKIE}=${encodeURIComponent(token)}`,
-    'Path=/',
-    'HttpOnly',
-    'SameSite=Lax',
-    `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
-  ];
-
-  if (process.env.NODE_ENV === 'production') {
-    cookieParts.push('Secure');
-  }
-
-  res.setHeader('Set-Cookie', cookieParts.join('; '));
-}
-
-function clearSessionCookie(res) {
-  res.setHeader(
-    'Set-Cookie',
-    `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
-  );
-}
-
-function createSession(user) {
-  const sessionId = crypto.randomBytes(24).toString('hex');
-  sessions.set(sessionId, {
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-    },
-    expiresAt: Date.now() + SESSION_TTL_MS,
-  });
-  return sessionId;
-}
-
-function getSession(req) {
-  const cookies = parseCookies(req.headers.cookie);
-  const token = cookies[SESSION_COOKIE];
-  const sessionId = getSessionIdFromToken(token);
-  if (!sessionId) {
+  const header = decodeBase64Json(headerPart);
+  const payload = decodeBase64Json(payloadPart);
+  if (!header || !payload) {
     return null;
   }
 
-  const session = sessions.get(sessionId);
-  if (!session) {
+  if (header.alg !== 'HS256' || header.typ !== 'JWT') {
     return null;
   }
 
-  if (session.expiresAt <= Date.now()) {
-    sessions.delete(sessionId);
+  const now = Math.floor(Date.now() / 1000);
+  if (typeof payload.exp !== 'number' || payload.exp <= now) {
+    return null;
+  }
+
+  if (
+    typeof payload.sub !== 'string' ||
+    typeof payload.email !== 'string' ||
+    typeof payload.role !== 'string'
+  ) {
     return null;
   }
 
   return {
-    id: sessionId,
-    ...session,
+    id: payload.sub,
+    email: payload.email,
+    role: payload.role,
+    status: payload.status,
   };
 }
 
-function deleteSession(req) {
-  const cookies = parseCookies(req.headers.cookie);
-  const token = cookies[SESSION_COOKIE];
-  const sessionId = getSessionIdFromToken(token);
-  if (sessionId) {
-    sessions.delete(sessionId);
+function getBearerToken(req) {
+  const authorization = req.headers.authorization;
+  if (typeof authorization !== 'string') {
+    return null;
   }
+
+  const [scheme, token] = authorization.split(' ');
+  if (!scheme || !token || scheme.toLowerCase() !== 'bearer') {
+    return null;
+  }
+
+  return token.trim() || null;
 }
 
-function requireSession(req, res, allowedRoles = ALL_ROLES) {
-  const session = getSession(req);
-  if (!session) {
+function requireAuth(req, res, allowedRoles = ALL_ROLES) {
+  const token = getBearerToken(req);
+  const user = verifyJwt(token);
+  if (!user) {
     sendJson(res, 401, { error: 'unauthorized' });
     return null;
   }
 
-  if (!allowedRoles.includes(session.user.role)) {
+  if (user.status !== 'active') {
+    sendJson(res, 403, { error: 'account_inactive' });
+    return null;
+  }
+
+  if (!allowedRoles.includes(user.role)) {
     sendJson(res, 403, { error: 'forbidden' });
     return null;
   }
 
-  return session;
+  return user;
 }
 
 function getApiAllowedRoles(pathname) {
@@ -238,24 +176,160 @@ function getApiAllowedRoles(pathname) {
 
 async function findUserByEmail(email) {
   const result = await db.query(
-    'SELECT id, email, password_hash, role FROM users WHERE email = $1 LIMIT 1',
+    'SELECT id, email, password_hash, role, status FROM users WHERE email = $1 LIMIT 1',
     [email]
   );
   return result.rows[0] || null;
 }
 
-async function handleLogin(req, res) {
-  let payload;
+function isDevelopment() {
+  return process.env.NODE_ENV === 'development';
+}
+
+function formatDbValue(value) {
+  if (value === undefined || value === null || value === '') {
+    return '<unset>';
+  }
+  return String(value);
+}
+
+function logAuthDbError(error) {
+  if (!isDevelopment()) {
+    return;
+  }
+
+  const message = error && error.message ? error.message : 'unknown error';
+  const host = formatDbValue(dbConnectionInfo.host);
+  const port = formatDbValue(dbConnectionInfo.port);
+  const database = formatDbValue(dbConnectionInfo.database);
+  const user = formatDbValue(dbConnectionInfo.user);
+
+  console.error(
+    'Auth login DB failure (%s) host=%s port=%s database=%s user=%s',
+    message,
+    host,
+    port,
+    database,
+    user
+  );
+
+  if (error && error.stack) {
+    console.error(error.stack);
+  }
+}
+
+function logDbStartupDiagnostics() {
+  if (!isDevelopment()) {
+    return;
+  }
+
+  const host = formatDbValue(dbConnectionInfo.host);
+  const port = formatDbValue(dbConnectionInfo.port);
+  const database = formatDbValue(dbConnectionInfo.database);
+  const user = formatDbValue(dbConnectionInfo.user);
+
+  console.log(
+    '[db] config source=%s host=%s port=%s database=%s user=%s',
+    dbConfigState.source,
+    host,
+    port,
+    database,
+    user
+  );
+
+  if (dbConfigState.missingEnvVars.length > 0) {
+    console.error(
+      '[db] missing env vars: %s',
+      dbConfigState.missingEnvVars.join(', ')
+    );
+  }
+
+  if (dbConnectionInfo.parseError) {
+    console.error('[db] invalid DATABASE_URL: %s', dbConnectionInfo.parseError);
+  }
+}
+
+async function checkDbConnectivity() {
+  if (!isDevelopment()) {
+    return;
+  }
+
+  let client;
   try {
-    payload = await readJsonBody(req);
+    client = await db.connect();
+    await client.query('SELECT 1');
+    console.log('[db] connectivity check passed');
   } catch (error) {
-    if (error.message === 'payload_too_large') {
-      sendJson(res, 413, { error: 'payload_too_large' });
-      return;
+    console.error('[db] connectivity check failed: %s', error.message);
+    if (error && error.stack) {
+      console.error(error.stack);
     }
+  } finally {
+    if (client) {
+      client.release();
+    }
+  }
+}
+
+function getBodyPreview(value) {
+  if (typeof value === 'string') {
+    return `string(length=${value.length})`;
+  }
+
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const keys = Object.keys(value).slice(0, 5);
+    return `object(keys=${keys.length ? keys.join(',') : 'none'})`;
+  }
+
+  if (Array.isArray(value)) {
+    return `array(length=${value.length})`;
+  }
+
+  return typeof value;
+}
+
+function normalizeLoginPayload(rawBody) {
+  if (rawBody && typeof rawBody === 'object' && !Array.isArray(rawBody)) {
+    return { payload: rawBody };
+  }
+
+  if (typeof rawBody !== 'string') {
+    return { payload: {} };
+  }
+
+  const source = rawBody.trim();
+  if (!source) {
+    return { payload: {} };
+  }
+
+  try {
+    const parsed = JSON.parse(source);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return { payload: parsed };
+    }
+    return { payload: {} };
+  } catch (_) {
+    return { error: 'invalid_json' };
+  }
+}
+
+async function handleLogin(req, res) {
+  if (isDevelopment()) {
+    console.debug(
+      '[auth/login] content-type=%s content-length=%s body=%s',
+      req.headers['content-type'] || '',
+      req.headers['content-length'] || '',
+      getBodyPreview(req.body)
+    );
+  }
+
+  const normalized = normalizeLoginPayload(req.body);
+  if (normalized.error) {
     sendJson(res, 400, { error: 'invalid_json' });
     return;
   }
+
+  const payload = normalized.payload;
 
   const email = typeof payload.email === 'string' ? payload.email.trim() : '';
   const password =
@@ -270,7 +344,11 @@ async function handleLogin(req, res) {
   try {
     user = await findUserByEmail(email);
   } catch (error) {
-    console.error('Auth login failed:', error.message);
+    if (isDevelopment()) {
+      logAuthDbError(error);
+    } else {
+      console.error('Auth login failed:', error.message);
+    }
     sendJson(res, 500, { error: 'auth_unavailable' });
     return;
   }
@@ -285,166 +363,120 @@ async function handleLogin(req, res) {
     return;
   }
 
-  const sessionId = createSession(user);
-  setSessionCookie(res, sessionId);
+  if (user.status !== 'active') {
+    sendJson(res, 403, { error: 'account_inactive' });
+    return;
+  }
+
+  const token = createJwt(user);
   sendJson(res, 200, {
+    token,
+    token_type: 'Bearer',
+    expires_in: JWT_TTL_SECONDS,
     user: {
       id: user.id,
       email: user.email,
       role: user.role,
+      status: user.status,
     },
   });
 }
 
-function resolveFilePath(urlPath) {
-  const decoded = decodeURIComponent(urlPath);
-  const safePath = decoded.replace(/\0/g, '');
-  const joined = path.join(webRoot, safePath);
-  const normalized = path.normalize(joined);
-  if (!normalized.startsWith(webRoot)) {
-    return null;
-  }
-  return normalized;
-}
+app.use(express.json({ limit: MAX_JSON_BODY, strict: false }));
+app.use(express.urlencoded({ extended: false }));
 
-function serveStatic(req, res) {
-  const urlPath = new URL(req.url, `http://${req.headers.host || 'localhost'}`).pathname;
-  let filePath = resolveFilePath(urlPath);
-  if (!filePath) {
-    sendText(res, 400, 'Bad request');
+app.get('/health', (req, res) => {
+  sendJson(res, 200, { status: 'ok' });
+});
+app.all('/health', (req, res) => {
+  sendJson(res, 405, { error: 'method_not_allowed' });
+});
+
+app.post('/auth/login', express.text({ type: 'text/plain', limit: MAX_JSON_BODY }), (req, res) => {
+  handleLogin(req, res).catch((error) => {
+    console.error('Unhandled auth login error:', error.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  });
+});
+app.all('/auth/login', (req, res) => {
+  sendJson(res, 405, { error: 'method_not_allowed' });
+});
+
+app.post('/auth/logout', (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+  sendNoContent(res);
+});
+app.all('/auth/logout', (req, res) => {
+  sendJson(res, 405, { error: 'method_not_allowed' });
+});
+
+app.get('/auth/me', (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) {
     return;
   }
 
-  fs.stat(filePath, (err, stats) => {
-    if (err) {
-      if (err.code === 'ENOENT') {
-        sendText(res, 404, 'Not found');
-        return;
-      }
-      sendText(res, 500, 'Failed to read static file');
-      return;
-    }
-
-    if (stats.isDirectory()) {
-      filePath = path.join(filePath, 'index.html');
-    }
-
-    fs.stat(filePath, (statErr, fileStats) => {
-      if (statErr || !fileStats.isFile()) {
-        if (statErr && statErr.code === 'ENOENT') {
-          sendText(res, 404, 'Not found');
-          return;
-        }
-        sendText(res, 500, 'Failed to read static file');
-        return;
-      }
-
-      const ext = path.extname(filePath).toLowerCase();
-      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-      res.writeHead(200, {
-        'Content-Type': contentType,
-        'Content-Length': fileStats.size,
-      });
-
-      if (req.method === 'HEAD') {
-        res.end();
-        return;
-      }
-
-      const stream = fs.createReadStream(filePath);
-      stream.on('error', () => {
-        if (!res.headersSent) {
-          sendText(res, 500, 'Failed to stream static file');
-        } else {
-          res.end();
-        }
-      });
-      stream.pipe(res);
-    });
-  });
-}
-
-const server = http.createServer((req, res) => {
-  (async () => {
-    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-
-    if (url.pathname === '/health') {
-      if (req.method !== 'GET') {
-        sendJson(res, 405, { error: 'method_not_allowed' });
-        return;
-      }
-      sendJson(res, 200, { status: 'ok' });
-      return;
-    }
-
-    if (url.pathname === '/auth/login') {
-      if (req.method !== 'POST') {
-        sendJson(res, 405, { error: 'method_not_allowed' });
-        return;
-      }
-      await handleLogin(req, res);
-      return;
-    }
-
-    if (url.pathname === '/auth/logout') {
-      if (req.method !== 'POST') {
-        sendJson(res, 405, { error: 'method_not_allowed' });
-        return;
-      }
-
-      const session = requireSession(req, res);
-      if (!session) {
-        return;
-      }
-
-      deleteSession(req);
-      clearSessionCookie(res);
-      sendNoContent(res);
-      return;
-    }
-
-    if (url.pathname === '/auth/me') {
-      if (req.method !== 'GET') {
-        sendJson(res, 405, { error: 'method_not_allowed' });
-        return;
-      }
-
-      const session = requireSession(req, res);
-      if (!session) {
-        return;
-      }
-
-      sendJson(res, 200, { user: session.user });
-      return;
-    }
-
-    if (url.pathname.startsWith('/api/')) {
-      const allowedRoles = getApiAllowedRoles(url.pathname);
-      const session = requireSession(req, res, allowedRoles);
-      if (!session) {
-        return;
-      }
-
-      sendJson(res, 404, { error: 'not_implemented' });
-      return;
-    }
-
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-      sendJson(res, 405, { error: 'method_not_allowed' });
-      return;
-    }
-
-    serveStatic(req, res);
-  })().catch((error) => {
-    console.error('Unhandled request error:', error.message);
-    if (!res.headersSent) {
-      sendJson(res, 500, { error: 'internal_error' });
-      return;
-    }
-    res.end();
-  });
+  sendJson(res, 200, { user });
+});
+app.all('/auth/me', (req, res) => {
+  sendJson(res, 405, { error: 'method_not_allowed' });
 });
 
-server.listen(PORT, () => {
+app.all(/^\/api(\/|$)/, (req, res) => {
+  const allowedRoles = getApiAllowedRoles(req.path);
+  const user = requireAuth(req, res, allowedRoles);
+  if (!user) {
+    return;
+  }
+
+  sendJson(res, 404, { error: 'not_implemented' });
+});
+
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    sendJson(res, 405, { error: 'method_not_allowed' });
+    return;
+  }
+
+  next();
+});
+
+app.use(express.static(webRoot));
+
+app.use((req, res) => {
+  sendText(res, 404, 'Not found');
+});
+
+app.use((error, req, res, next) => {
+  if (res.headersSent) {
+    next(error);
+    return;
+  }
+
+  if (error && error.type === 'entity.too.large') {
+    sendJson(res, 413, { error: 'payload_too_large' });
+    return;
+  }
+
+  if (error instanceof SyntaxError && error.status === 400 && 'body' in error) {
+    sendJson(res, 400, { error: 'invalid_json' });
+    return;
+  }
+
+  console.error('Unhandled request error:', error.message);
+  sendJson(res, 500, { error: 'internal_error' });
+});
+
+app.listen(PORT, () => {
   console.log(`API listening on http://localhost:${PORT}`);
+  logDbStartupDiagnostics();
+  checkDbConnectivity().catch((error) => {
+    console.error('[db] connectivity check failed unexpectedly: %s', error.message);
+    if (error && error.stack) {
+      console.error(error.stack);
+    }
+  });
 });

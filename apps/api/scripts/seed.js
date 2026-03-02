@@ -1,15 +1,9 @@
-const crypto = require('crypto');
 const { createClient } = require('./db');
+const { hashPassword } = require('../lib/password');
 
 const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || 'admin@local.dev';
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'admin123';
 const DEFAULT_PROJECT_NAME = process.env.SEED_DEFAULT_PROJECT || 'Default Project';
-
-function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
-  return `scrypt$${salt}$${hash}`;
-}
 
 async function main() {
   const client = createClient();
@@ -21,11 +15,12 @@ async function main() {
     const passwordHash = hashPassword(ADMIN_PASSWORD);
     const adminResult = await client.query(
       `
-        INSERT INTO users (email, password_hash, role)
-        VALUES ($1, $2, 'admin')
+        INSERT INTO users (email, password_hash, role, status)
+        VALUES ($1, $2, 'admin', 'active')
         ON CONFLICT (email)
         DO UPDATE SET
           role = EXCLUDED.role,
+          status = EXCLUDED.status,
           updated_at = NOW()
         RETURNING id
       `,
@@ -60,5 +55,8 @@ async function main() {
 
 main().catch((error) => {
   console.error('Seed failed:', error.message);
+  if (error && error.stack) {
+    console.error(error.stack);
+  }
   process.exit(1);
 });

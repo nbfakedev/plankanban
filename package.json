@@ -3,13 +3,14 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "dev": "node --watch apps/api/server.js",
-    "start": "node apps/api/server.js",
+    "dev": "node --env-file=.env --watch apps/api/server.js",
+    "start": "node --env-file=.env apps/api/server.js",
     "db:migrate": "node --env-file=.env apps/api/scripts/migrate.js",
     "db:rollback": "node --env-file=.env apps/api/scripts/rollback.js",
     "db:seed": "node --env-file=.env apps/api/scripts/seed.js"
   },
   "dependencies": {
+    "express": "^4.21.2",
     "pg": "^8.19.0"
   }
 }
