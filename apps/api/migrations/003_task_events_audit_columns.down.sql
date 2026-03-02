@@ -1,0 +1,8 @@
+ALTER TABLE task_events
+DROP COLUMN IF EXISTS "after";
+
+ALTER TABLE task_events
+DROP COLUMN IF EXISTS "before";
+
+ALTER TABLE task_events
+DROP COLUMN IF EXISTS action;

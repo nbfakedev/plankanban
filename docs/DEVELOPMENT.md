@@ -57,3 +57,19 @@ Stop local services:
    - `npm run db:seed`
 5) Start API with env file:
    - `npm run dev`
+
+## Manual API checklist (Projects/Tasks)
+1) Login as admin and save token:
+   - `curl.exe -sS -X POST "http://localhost:3000/auth/login" -H "Content-Type: application/json" --data "{\"email\":\"admin@local.dev\",\"password\":\"admin123\"}"`
+2) Create project (admin/techlead only):
+   - `curl.exe -sS -X POST "http://localhost:3000/projects" -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data "{\"name\":\"Backend Project\"}"`
+3) List visible projects:
+   - `curl.exe -sS "http://localhost:3000/projects" -H "Authorization: Bearer <TOKEN>"`
+4) Create task in project (admin/techlead only):
+   - `curl.exe -sS -X POST "http://localhost:3000/projects/<PROJECT_ID>/tasks" -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data "{\"title\":\"Implement API\",\"col\":\"todo\"}"`
+5) Update task fields:
+   - `curl.exe -sS -X PATCH "http://localhost:3000/tasks/<TASK_ID>" -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data "{\"priority\":2,\"notes\":\"updated\"}"`
+6) Move task between columns:
+   - `curl.exe -sS -X POST "http://localhost:3000/tasks/<TASK_ID>/move" -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data "{\"status\":\"doing\"}"`
+7) RBAC check:
+   - employee token gets `403 forbidden` on project/task create-update-move, and sees only assigned tasks in `GET /projects/<PROJECT_ID>/tasks`.

@@ -12,6 +12,9 @@ const PORT = Number(process.env.PORT) || 3000;
 const webRoot = path.resolve(__dirname, '..', 'web');
 const MAX_JSON_BODY = '1mb';
 const ALL_ROLES = ['admin', 'techlead', 'employee'];
+const PROJECT_WRITE_ROLES = ['admin', 'techlead'];
+const TASK_WRITE_ROLES = ['admin', 'techlead'];
+const TASK_COLUMNS = ['backlog', 'todo', 'doing', 'review', 'done'];
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret_change_me';
 const JWT_TTL_HOURS = Number(process.env.JWT_TTL_HOURS) || 24;
 const JWT_TTL_SECONDS = JWT_TTL_HOURS * 60 * 60;
@@ -172,6 +175,396 @@ function getApiAllowedRoles(pathname) {
   }
 
   return ALL_ROLES;
+}
+
+function isObjectPayload(value) {
+  return value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isUuid(value) {
+  return (
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value
+    )
+  );
+}
+
+function normalizeNullableString(value) {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+function sanitizeTaskForAudit(task) {
+  if (!task) {
+    return {};
+  }
+
+  return {
+    id: task.id,
+    project_id: task.project_id,
+    title: task.title,
+    col: task.col,
+    stage: task.stage,
+    assignee_user_id: task.assignee_user_id,
+    track: task.track,
+    agent: task.agent,
+    priority: task.priority,
+    hours: task.hours,
+    desc: task.desc,
+    notes: task.notes,
+    deps: task.deps,
+    created_at: task.created_at,
+    updated_at: task.updated_at,
+  };
+}
+
+function parseProjectCreatePayload(payload) {
+  if (!isObjectPayload(payload)) {
+    return { error: 'invalid_payload' };
+  }
+
+  const name = typeof payload.name === 'string' ? payload.name.trim() : '';
+  if (!name) {
+    return { error: 'invalid_payload' };
+  }
+
+  return { value: { name } };
+}
+
+function normalizeTaskColumn(col, status) {
+  if (col !== undefined && status !== undefined && col !== status) {
+    return { error: 'invalid_payload' };
+  }
+
+  const value = col !== undefined ? col : status;
+  if (value === undefined) {
+    return { value: undefined };
+  }
+
+  if (typeof value !== 'string' || !TASK_COLUMNS.includes(value)) {
+    return { error: 'invalid_payload' };
+  }
+
+  return { value };
+}
+
+function parseTaskCreatePayload(payload) {
+  if (!isObjectPayload(payload)) {
+    return { error: 'invalid_payload' };
+  }
+
+  const title = typeof payload.title === 'string' ? payload.title.trim() : '';
+  if (!title) {
+    return { error: 'invalid_payload' };
+  }
+
+  const colResult = normalizeTaskColumn(payload.col, payload.status);
+  if (colResult.error) {
+    return colResult;
+  }
+
+  const updates = {
+    title,
+  };
+
+  if (colResult.value !== undefined) {
+    updates.col = colResult.value;
+  }
+
+  if (payload.stage !== undefined) {
+    if (payload.stage !== null && typeof payload.stage !== 'string') {
+      return { error: 'invalid_payload' };
+    }
+    updates.stage = normalizeNullableString(payload.stage);
+  }
+
+  if (payload.assignee_user_id !== undefined) {
+    if (
+      payload.assignee_user_id !== null &&
+      !isUuid(payload.assignee_user_id)
+    ) {
+      return { error: 'invalid_payload' };
+    }
+    updates.assignee_user_id = payload.assignee_user_id;
+  }
+
+  if (payload.track !== undefined) {
+    if (payload.track !== null && typeof payload.track !== 'string') {
+      return { error: 'invalid_payload' };
+    }
+    updates.track = normalizeNullableString(payload.track);
+  }
+
+  if (payload.agent !== undefined) {
+    if (payload.agent !== null && typeof payload.agent !== 'string') {
+      return { error: 'invalid_payload' };
+    }
+    updates.agent = normalizeNullableString(payload.agent);
+  }
+
+  if (payload.priority !== undefined) {
+    if (!Number.isInteger(payload.priority)) {
+      return { error: 'invalid_payload' };
+    }
+    updates.priority = payload.priority;
+  }
+
+  if (payload.hours !== undefined) {
+    if (payload.hours !== null && !Number.isFinite(payload.hours)) {
+      return { error: 'invalid_payload' };
+    }
+    updates.hours = payload.hours;
+  }
+
+  if (payload.desc !== undefined) {
+    if (payload.desc !== null && typeof payload.desc !== 'string') {
+      return { error: 'invalid_payload' };
+    }
+    updates.desc = normalizeNullableString(payload.desc);
+  }
+
+  if (payload.notes !== undefined) {
+    if (payload.notes !== null && typeof payload.notes !== 'string') {
+      return { error: 'invalid_payload' };
+    }
+    updates.notes = normalizeNullableString(payload.notes);
+  }
+
+  if (payload.deps !== undefined) {
+    updates.deps = payload.deps;
+  }
+
+  return { value: updates };
+}
+
+function parseTaskPatchPayload(payload) {
+  if (!isObjectPayload(payload)) {
+    return { error: 'invalid_payload' };
+  }
+
+  const colResult = normalizeTaskColumn(payload.col, payload.status);
+  if (colResult.error) {
+    return colResult;
+  }
+
+  const updates = {};
+  if (payload.title !== undefined) {
+    const title = typeof payload.title === 'string' ? payload.title.trim() : '';
+    if (!title) {
+      return { error: 'invalid_payload' };
+    }
+    updates.title = title;
+  }
+
+  if (colResult.value !== undefined) {
+    updates.col = colResult.value;
+  }
+
+  if (payload.stage !== undefined) {
+    if (payload.stage !== null && typeof payload.stage !== 'string') {
+      return { error: 'invalid_payload' };
+    }
+    updates.stage = normalizeNullableString(payload.stage);
+  }
+
+  if (payload.assignee_user_id !== undefined) {
+    if (
+      payload.assignee_user_id !== null &&
+      !isUuid(payload.assignee_user_id)
+    ) {
+      return { error: 'invalid_payload' };
+    }
+    updates.assignee_user_id = payload.assignee_user_id;
+  }
+
+  if (payload.track !== undefined) {
+    if (payload.track !== null && typeof payload.track !== 'string') {
+      return { error: 'invalid_payload' };
+    }
+    updates.track = normalizeNullableString(payload.track);
+  }
+
+  if (payload.agent !== undefined) {
+    if (payload.agent !== null && typeof payload.agent !== 'string') {
+      return { error: 'invalid_payload' };
+    }
+    updates.agent = normalizeNullableString(payload.agent);
+  }
+
+  if (payload.priority !== undefined) {
+    if (!Number.isInteger(payload.priority)) {
+      return { error: 'invalid_payload' };
+    }
+    updates.priority = payload.priority;
+  }
+
+  if (payload.hours !== undefined) {
+    if (payload.hours !== null && !Number.isFinite(payload.hours)) {
+      return { error: 'invalid_payload' };
+    }
+    updates.hours = payload.hours;
+  }
+
+  if (payload.desc !== undefined) {
+    if (payload.desc !== null && typeof payload.desc !== 'string') {
+      return { error: 'invalid_payload' };
+    }
+    updates.desc = normalizeNullableString(payload.desc);
+  }
+
+  if (payload.notes !== undefined) {
+    if (payload.notes !== null && typeof payload.notes !== 'string') {
+      return { error: 'invalid_payload' };
+    }
+    updates.notes = normalizeNullableString(payload.notes);
+  }
+
+  if (payload.deps !== undefined) {
+    updates.deps = payload.deps;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return { error: 'invalid_payload' };
+  }
+
+  return { value: updates };
+}
+
+function parseTaskMovePayload(payload) {
+  if (!isObjectPayload(payload)) {
+    return { error: 'invalid_payload' };
+  }
+
+  const colResult = normalizeTaskColumn(payload.col, payload.status);
+  if (colResult.error || colResult.value === undefined) {
+    return { error: 'invalid_payload' };
+  }
+
+  return { value: { col: colResult.value } };
+}
+
+async function findProjectById(projectId) {
+  const result = await db.query(
+    `
+      SELECT id, name, created_by, llm_provider, llm_model, created_at, updated_at
+      FROM projects
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [projectId]
+  );
+  return result.rows[0] || null;
+}
+
+async function findVisibleProjectById(projectId, user) {
+  if (user.role === 'employee') {
+    const result = await db.query(
+      `
+        SELECT p.id, p.name, p.created_by, p.llm_provider, p.llm_model, p.created_at, p.updated_at
+        FROM projects p
+        WHERE p.id = $1
+          AND EXISTS (
+            SELECT 1
+            FROM tasks t
+            WHERE t.project_id = p.id
+              AND t.assignee_user_id = $2
+          )
+        LIMIT 1
+      `,
+      [projectId, user.id]
+    );
+    return result.rows[0] || null;
+  }
+
+  return findProjectById(projectId);
+}
+
+async function findTaskById(taskId) {
+  const result = await db.query(
+    `
+      SELECT id, project_id, title, col, stage, assignee_user_id, track, agent,
+             priority, hours, "desc", notes, deps, created_at, updated_at
+      FROM tasks
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [taskId]
+  );
+  return result.rows[0] || null;
+}
+
+async function writeTaskEvent(params) {
+  const beforeState = sanitizeTaskForAudit(params.before);
+  const afterState = sanitizeTaskForAudit(params.after);
+  await db.query(
+    `
+      INSERT INTO task_events (
+        project_id,
+        task_id,
+        actor_user_id,
+        event_type,
+        payload,
+        action,
+        "before",
+        "after"
+      )
+      VALUES ($1, $2, $3, $4, $5::jsonb, $4, $6::jsonb, $7::jsonb)
+    `,
+    [
+      params.projectId,
+      params.taskId,
+      params.actorUserId,
+      params.action,
+      JSON.stringify({ before: beforeState, after: afterState }),
+      JSON.stringify(beforeState),
+      JSON.stringify(afterState),
+    ]
+  );
+}
+
+function buildTaskUpdateStatement(updates) {
+  const fieldMap = {
+    title: 'title',
+    col: 'col',
+    stage: 'stage',
+    assignee_user_id: 'assignee_user_id',
+    track: 'track',
+    agent: 'agent',
+    priority: 'priority',
+    hours: 'hours',
+    desc: '"desc"',
+    notes: 'notes',
+    deps: 'deps',
+  };
+
+  const keys = Object.keys(updates);
+  const assignments = [];
+  const values = [];
+
+  keys.forEach((key, index) => {
+    const column = fieldMap[key];
+    if (!column) {
+      return;
+    }
+    values.push(updates[key]);
+    assignments.push(`${column} = $${index + 1}`);
+  });
+
+  assignments.push(`updated_at = NOW()`);
+
+  return {
+    setClause: assignments.join(', '),
+    values,
+  };
 }
 
 async function findUserByEmail(email) {
@@ -423,6 +816,366 @@ app.get('/auth/me', (req, res) => {
 });
 app.all('/auth/me', (req, res) => {
   sendJson(res, 405, { error: 'method_not_allowed' });
+});
+
+app.get('/projects', async (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  try {
+    let result;
+    if (user.role === 'employee') {
+      result = await db.query(
+        `
+          SELECT DISTINCT p.id, p.name, p.created_by, p.llm_provider, p.llm_model, p.created_at, p.updated_at
+          FROM projects p
+          INNER JOIN tasks t ON t.project_id = p.id
+          WHERE t.assignee_user_id = $1
+          ORDER BY p.created_at DESC
+        `,
+        [user.id]
+      );
+    } else {
+      result = await db.query(
+        `
+          SELECT id, name, created_by, llm_provider, llm_model, created_at, updated_at
+          FROM projects
+          ORDER BY created_at DESC
+        `
+      );
+    }
+
+    sendJson(res, 200, { projects: result.rows });
+  } catch (error) {
+    console.error('GET /projects failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'projects_unavailable' });
+  }
+});
+
+app.post('/projects', async (req, res) => {
+  const user = requireAuth(req, res, PROJECT_WRITE_ROLES);
+  if (!user) {
+    return;
+  }
+
+  const parsed = parseProjectCreatePayload(req.body);
+  if (parsed.error) {
+    sendJson(res, 400, { error: parsed.error });
+    return;
+  }
+
+  try {
+    const result = await db.query(
+      `
+        INSERT INTO projects (name, created_by)
+        VALUES ($1, $2)
+        RETURNING id, name, created_by, llm_provider, llm_model, created_at, updated_at
+      `,
+      [parsed.value.name, user.id]
+    );
+
+    sendJson(res, 201, { project: result.rows[0] });
+  } catch (error) {
+    console.error('POST /projects failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'projects_unavailable' });
+  }
+});
+
+app.get('/projects/:id', async (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  const { id } = req.params;
+  if (!isUuid(id)) {
+    sendJson(res, 400, { error: 'invalid_project_id' });
+    return;
+  }
+
+  try {
+    const project = await findVisibleProjectById(id, user);
+    if (!project) {
+      sendJson(res, 404, { error: 'project_not_found' });
+      return;
+    }
+
+    sendJson(res, 200, { project });
+  } catch (error) {
+    console.error('GET /projects/:id failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'projects_unavailable' });
+  }
+});
+
+app.get('/projects/:projectId/tasks', async (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  const { projectId } = req.params;
+  if (!isUuid(projectId)) {
+    sendJson(res, 400, { error: 'invalid_project_id' });
+    return;
+  }
+
+  try {
+    const project = await findVisibleProjectById(projectId, user);
+    if (!project) {
+      sendJson(res, 404, { error: 'project_not_found' });
+      return;
+    }
+
+    let result;
+    if (user.role === 'employee') {
+      result = await db.query(
+        `
+          SELECT id, project_id, title, col, stage, assignee_user_id, track, agent,
+                 priority, hours, "desc", notes, deps, created_at, updated_at
+          FROM tasks
+          WHERE project_id = $1
+            AND assignee_user_id = $2
+          ORDER BY created_at ASC
+        `,
+        [projectId, user.id]
+      );
+    } else {
+      result = await db.query(
+        `
+          SELECT id, project_id, title, col, stage, assignee_user_id, track, agent,
+                 priority, hours, "desc", notes, deps, created_at, updated_at
+          FROM tasks
+          WHERE project_id = $1
+          ORDER BY created_at ASC
+        `,
+        [projectId]
+      );
+    }
+
+    sendJson(res, 200, { tasks: result.rows });
+  } catch (error) {
+    console.error('GET /projects/:projectId/tasks failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'tasks_unavailable' });
+  }
+});
+
+app.post('/projects/:projectId/tasks', async (req, res) => {
+  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  if (!user) {
+    return;
+  }
+
+  const { projectId } = req.params;
+  if (!isUuid(projectId)) {
+    sendJson(res, 400, { error: 'invalid_project_id' });
+    return;
+  }
+
+  const parsed = parseTaskCreatePayload(req.body);
+  if (parsed.error) {
+    sendJson(res, 400, { error: parsed.error });
+    return;
+  }
+
+  try {
+    const project = await findProjectById(projectId);
+    if (!project) {
+      sendJson(res, 404, { error: 'project_not_found' });
+      return;
+    }
+
+    const payload = parsed.value;
+    const created = await db.query(
+      `
+        INSERT INTO tasks (
+          project_id,
+          title,
+          col,
+          stage,
+          assignee_user_id,
+          track,
+          agent,
+          priority,
+          hours,
+          "desc",
+          notes,
+          deps
+        )
+        VALUES (
+          $1, $2, COALESCE($3, 'backlog'), $4, $5, $6, $7, COALESCE($8, 0), $9, $10, $11, $12
+        )
+        RETURNING id, project_id, title, col, stage, assignee_user_id, track, agent,
+                  priority, hours, "desc", notes, deps, created_at, updated_at
+      `,
+      [
+        projectId,
+        payload.title,
+        payload.col || null,
+        payload.stage ?? null,
+        payload.assignee_user_id ?? null,
+        payload.track ?? null,
+        payload.agent ?? null,
+        payload.priority ?? null,
+        payload.hours ?? null,
+        payload.desc ?? null,
+        payload.notes ?? null,
+        payload.deps ?? null,
+      ]
+    );
+
+    const task = created.rows[0];
+    await writeTaskEvent({
+      projectId,
+      taskId: task.id,
+      actorUserId: user.id,
+      action: 'create',
+      before: {},
+      after: task,
+    });
+
+    sendJson(res, 201, { task });
+  } catch (error) {
+    if (error && error.code === '23503') {
+      sendJson(res, 400, { error: 'invalid_payload' });
+      return;
+    }
+    console.error('POST /projects/:projectId/tasks failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'tasks_unavailable' });
+  }
+});
+
+app.patch('/tasks/:id', async (req, res) => {
+  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  if (!user) {
+    return;
+  }
+
+  const { id } = req.params;
+  if (!isUuid(id)) {
+    sendJson(res, 400, { error: 'invalid_task_id' });
+    return;
+  }
+
+  const parsed = parseTaskPatchPayload(req.body);
+  if (parsed.error) {
+    sendJson(res, 400, { error: parsed.error });
+    return;
+  }
+
+  try {
+    const before = await findTaskById(id);
+    if (!before) {
+      sendJson(res, 404, { error: 'task_not_found' });
+      return;
+    }
+
+    const update = buildTaskUpdateStatement(parsed.value);
+    const result = await db.query(
+      `
+        UPDATE tasks
+        SET ${update.setClause}
+        WHERE id = $${update.values.length + 1}
+        RETURNING id, project_id, title, col, stage, assignee_user_id, track, agent,
+                  priority, hours, "desc", notes, deps, created_at, updated_at
+      `,
+      [...update.values, id]
+    );
+    const after = result.rows[0];
+
+    await writeTaskEvent({
+      projectId: after.project_id,
+      taskId: after.id,
+      actorUserId: user.id,
+      action: 'update',
+      before,
+      after,
+    });
+
+    sendJson(res, 200, { task: after });
+  } catch (error) {
+    if (error && error.code === '23503') {
+      sendJson(res, 400, { error: 'invalid_payload' });
+      return;
+    }
+    console.error('PATCH /tasks/:id failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'tasks_unavailable' });
+  }
+});
+
+app.post('/tasks/:id/move', async (req, res) => {
+  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  if (!user) {
+    return;
+  }
+
+  const { id } = req.params;
+  if (!isUuid(id)) {
+    sendJson(res, 400, { error: 'invalid_task_id' });
+    return;
+  }
+
+  const parsed = parseTaskMovePayload(req.body);
+  if (parsed.error) {
+    sendJson(res, 400, { error: parsed.error });
+    return;
+  }
+
+  try {
+    const before = await findTaskById(id);
+    if (!before) {
+      sendJson(res, 404, { error: 'task_not_found' });
+      return;
+    }
+
+    const moved = await db.query(
+      `
+        UPDATE tasks
+        SET col = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING id, project_id, title, col, stage, assignee_user_id, track, agent,
+                  priority, hours, "desc", notes, deps, created_at, updated_at
+      `,
+      [parsed.value.col, id]
+    );
+    const after = moved.rows[0];
+
+    await writeTaskEvent({
+      projectId: after.project_id,
+      taskId: after.id,
+      actorUserId: user.id,
+      action: 'move',
+      before,
+      after,
+    });
+
+    sendJson(res, 200, { task: after });
+  } catch (error) {
+    console.error('POST /tasks/:id/move failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'tasks_unavailable' });
+  }
 });
 
 app.all(/^\/api(\/|$)/, (req, res) => {

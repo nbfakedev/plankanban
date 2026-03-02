@@ -43,6 +43,9 @@
 - project_id
 - task_id
 - actor_user_id
+- action (create|update|move)
+- before (jsonb)
+- after (jsonb)
 - event_type (create|update|move|comment|complete|...)
 - payload (jsonb)
 - created_at
