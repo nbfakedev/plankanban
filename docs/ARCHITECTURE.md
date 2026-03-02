@@ -1,32 +1,16 @@
-# Архитектура (целевая)
+# Architecture (goal)
 
-## Компоненты
-1) Web (browser)
-- Kanban UI.
-- Делает запросы только к вашему домену (`/api/...`).
+## Components
+1) **Web (browser)** — Kanban UI that only calls `/api/` endpoints for tasks, projects, assignments, and the LLM gateway.
+2) **API (Timeweb VPS, Node.js)** — Postgres-backed server with session/JWT authentication, RBAC (admin/techlead/employee), projects/tasks/audit CRUD, multi-user bookkeeping, and an LLM gateway that dynamically selects provider/model, applies rate limits, and surfaces fail-state messaging.
+3) **DB (Postgres)** — Persistent storage for users/roles, projects, tasks, task events (audit trail), LLM requests, and configuration metadata.
+4) **LLM provider bridge** — API decides provider/model per request; optional worker or proxy enforces shared secrets, TLS, retry logic, and logs limited metadata.
 
-2) API (VPS, Node.js)
-- Auth (login/password), сессии/JWT.
-- RBAC (admin, techlead, employee).
-- Projects/Tasks/Audit CRUD.
-- LLM Gateway: единый endpoint `/api/llm/chat`, адаптеры провайдеров, лимиты, аудит.
+## Data flows
+A) UI → API → DB: user actions (auth, project/task CRUD, role assignment) persist via Postgres and return audit events.
+B) UI → API (LLM gateway) → Provider: the gateway normalizes prompts/responses, records usage, and lets the API pick provider/model (Claude, OpenAI, etc.).
 
-3) DB (Postgres)
-- Users, Projects, Tasks, TaskEvents (аудит), LlmRequests (учёт токенов/стоимости).
-
-4) LLM Provider bridge (опционально)
-- Cloudflare Worker как “мост” к Anthropic из РФ (сервер-сервер).
-- Worker закрыт shared-secret-ом (не публичный прокси).
-
-## Потоки
-A) UI → API → DB
-- пользовательские действия: доска, задачи, проекты, роли.
-
-B) UI → API (LLM gateway) → (Worker) → Provider
-- генерация задачи, чат, импорт-парсинг.
-
-## Нефункциональные требования (минимум)
-- Безопасность: ключи только на сервере, HTTPS обязательно, rate limit на LLM.
-- Надёжность: бэкапы Postgres, ротация логов.
-- Производительность: 100–300 задач в проекте без лагов; сервер отвечает за хранение/права, не за рендер.
-
+## Nonfunctional
+- Server deployment lives on Timeweb VPS with nginx + HTTPS; TLS certificates, PM2, and rollback scripts are part of `infra/`.
+- Postgres ensures server-side storage; RBAC keeps users scoped to admin/techlead/employee capabilities.
+- LLM errors and provider limits are surfaced to users (no silent failures); logs avoid secrets and payload dumps.

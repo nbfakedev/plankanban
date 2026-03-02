@@ -1,21 +1,20 @@
 # PlanKanban (server edition)
 
-Single-user / small-team kanban, исходно single-file HTML, далее — серверная версия: авторизация, роли, база данных, LLM gateway (Claude/OpenAI/др) без ключей в браузере.
+Multi-user Kanban with Postgres storage, role-based auth (admin/techlead/employee), an LLM gateway that lets the API choose provider/model, and a Timeweb VPS deployment with HTTPS.
 
-## Репозиторий
-- `apps/web/` — фронтенд (пока: `index.html` = текущий kanban).
-- `apps/api/` — backend API (Node.js): auth, RBAC, проекты, задачи, аудит, LLM gateway.
-- `infra/` — nginx, TLS, деплой.
-- `docs/` — требования, архитектура, API, БД, ADR.
+## Repository layout
+- `apps/web/` — lightweight front-end (`index.html`) that talks to `/api/`.
+- `apps/api/` — Node.js backend: Postgres persistence, RBAC, projects/tasks/audit, and an LLM gateway with provider/model selection plus logging and fail-state reporting.
+- `infra/` — Timeweb VPS helpers: nginx, TLS certificates, PM2, deployment scripts, and optional gateway proxies.
+- `docs/` — requirements, architecture, API, DB/migration guidance, deployment playbooks, and rollback plans.
 
-## Быстрый старт (локально, dev)
-1. Установить Node.js LTS и Docker.
-2. Скопировать `.env.example` → `.env` и заполнить переменные.
-3. Запуск dev-окружения: см. `docs/DEVELOPMENT.md`.
+## Quick start (local/dev)
+1. Install Node.js LTS, Docker, and Postgres tooling.
+2. Copy `.env.example` → `.env` and fill credentials for the API, Postgres, and LLM providers.
+3. Follow `docs/DEVELOPMENT.md` to run the API, front end, and Postgres locally.
 
-## Деплой
-См. `docs/DEPLOYMENT.md` (VPS + nginx + HTTPS + PM2 + Postgres + Cloudflare Worker для Anthropic).
+## Deployment
+See `docs/DEPLOYMENT.md` for the Timeweb VPS launch checklist (nginx + TLS, Postgres, PM2, LLM gateway) plus rollback guidance.
 
-## Правила работы через Codex (VS Code)
-См. `AGENTS.md` (как резать задачи, как делать PR, как проверять, как не ломать UX).
-
+## Codex workflow (VS Code)
+See `AGENTS.md` for branching, PR, testing, and shared UX rules.
