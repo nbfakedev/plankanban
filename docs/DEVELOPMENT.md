@@ -25,3 +25,7 @@
 1) `npm install` in repo root
 2) `npm run dev` (API + static web on :3000)
 3) `npm start` (normal start without watch)
+
+## Docker development
+- `docker compose up --force-recreate api`
+- `docker compose down`

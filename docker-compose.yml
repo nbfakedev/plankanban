@@ -1,14 +1,11 @@
 services:
-  db:
-    image: postgres:16
-    environment:
-      POSTGRES_USER: kanban
-      POSTGRES_PASSWORD: kanban_password
-      POSTGRES_DB: kanban
+  api:
+    image: node:20-alpine
+    working_dir: /usr/src/app
     ports:
-      - "5432:5432"
+      - "3000:3000"
     volumes:
-      - pgdata:/var/lib/postgresql/data
-
-volumes:
-  pgdata:
+      - .:/usr/src/app:delegated
+    command: sh -c "npm install && npm run dev"
+    environment:
+      - PORT=3000
