@@ -1,48 +1,43 @@
-# API (черновой контракт)
+# API
 
-## Auth
-POST `/api/auth/login`
-- body: { email, password }
-- 200: { user }
-- 401: invalid_credentials
+## Auth Strategy
+- Session-based auth with an HttpOnly cookie (`kb_session`).
+- Chosen for local MVP: simple server-side invalidation on logout and no token revocation flow.
 
-POST `/api/auth/logout`
+## Roles (RBAC)
+- `admin`
+- `techlead`
+- `employee`
+
+Route protection behavior:
+- `/auth/me`, `/auth/logout`: any authenticated role.
+- `/api/admin/*`: `admin` only.
+- `/api/techlead/*`: `admin` or `techlead`.
+- `/api/*` (other): any authenticated role.
+
+## Auth Endpoints
+POST `/auth/login`
+- body: `{ "email": "string", "password": "string" }`
+- 200: `{ "user": { "id": "uuid", "email": "string", "role": "admin|techlead|employee" } }` + sets HttpOnly session cookie
+- 400: `{ "error": "invalid_json|invalid_payload" }`
+- 401: `{ "error": "invalid_credentials" }`
+- 500: `{ "error": "auth_unavailable" }`
+
+POST `/auth/logout`
+- requires authenticated session
 - 204
+- 401: `{ "error": "unauthorized" }`
 
-GET `/api/auth/me`
-- 200: { user }
-
-## Projects
-GET `/api/projects`
-POST `/api/projects`
-PATCH `/api/projects/:id`
-DELETE `/api/projects/:id`
-
-## Tasks
-GET `/api/projects/:projectId/tasks?stage=&q=&assignee=&track=&agent=`
-POST `/api/projects/:projectId/tasks`
-PATCH `/api/tasks/:id`
-POST `/api/tasks/:id/move` (col/stage)
-POST `/api/tasks/:id/complete`
-
-## Audit
-GET `/api/projects/:projectId/audit?from=&to=`
-
-## LLM (единый шлюз)
-POST `/api/llm/chat`
-- body: {
-  purpose: "new_task"|"chat"|"import_parse",
-  provider: "anthropic"|"openai"|"...",   // можно не передавать, если берём из настроек проекта
-  model: "string",
-  messages: [{ role: "system"|"user"|"assistant", content: "text" }],
-  params: { temperature?: number, max_tokens?: number }
-}
-- 200: { text, usage?, cost_estimate? }
-- 4xx/5xx: { error, details? }
-
-Все изменения контракта фиксировать здесь до реализации.
-
+GET `/auth/me`
+- requires authenticated session
+- 200: `{ "user": { "id": "uuid", "email": "string", "role": "admin|techlead|employee" } }`
+- 401: `{ "error": "unauthorized" }`
 
 ## Health
 GET `/health`
-- 200: { status: "ok" }
+- 200: `{ "status": "ok" }`
+
+## Not Implemented Yet
+- Tasks API
+- Projects API
+- LLM API
