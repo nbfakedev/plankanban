@@ -29,3 +29,18 @@
 ## Docker development
 - `docker compose up --force-recreate api`
 - `docker compose down`
+
+## Local Postgres + migrations
+1) `cp .env.example .env`
+2) `docker compose up -d db`
+3) `docker compose ps db` (wait for `running`)
+4) `npm install`
+5) `npm run db:migrate`
+6) `npm run db:seed`
+7) `npm run dev`
+
+Rollback the latest migration:
+- `npm run db:rollback`
+
+Stop local services:
+- `docker compose down`
