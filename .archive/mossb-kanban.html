@@ -1,0 +1,1859 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mossb.ru — Project Board</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --gold:#f0a500;--gold2:#ffc235;--gold-glow:rgba(240,165,0,.3);--gold-dim:rgba(240,165,0,.12);
+  --c-A:#4a9eff;--c-R1:#a78bfa;--c-R11:#fb923c;--c-R2:#f87171;--c-R3:#4ade80;--c-F:#22d3ee;
+  --green:#4ade80;--yellow:#fbbf24;--red:#f87171;
+}
+[data-theme="dark"]{
+  --bg:#080b12;--bg2:#0e1420;
+  --sf:rgba(255,255,255,.04);--sf2:rgba(255,255,255,.07);--sf3:rgba(255,255,255,.12);
+  --bd:rgba(255,255,255,.08);--bd2:rgba(255,255,255,.14);--bd3:rgba(255,255,255,.22);
+  --tx:#f0ede8;--tx2:#8a97b0;--tx3:#424d62;--tx4:#2a3347;
+  --sh:0 4px 24px rgba(0,0,0,.5);--sh-lg:0 20px 70px rgba(0,0,0,.75);
+  --hbg:rgba(8,11,18,.93);--mbg:rgba(10,14,22,.97);--scr:rgba(255,255,255,.08);
+}
+[data-theme="light"]{
+  --bg:#eef0f7;--bg2:#e4e7f2;
+  --sf:rgba(255,255,255,.82);--sf2:rgba(255,255,255,.96);--sf3:#fff;
+  --bd:rgba(0,0,0,.09);--bd2:rgba(0,0,0,.15);--bd3:rgba(0,0,0,.23);
+  --tx:#1a1f2e;--tx2:#4a556a;--tx3:#8a97b0;--tx4:#b0bdd0;
+  --sh:0 4px 20px rgba(0,0,0,.08);--sh-lg:0 16px 48px rgba(0,0,0,.14);
+  --hbg:rgba(238,240,247,.95);--mbg:rgba(244,246,252,.99);--scr:rgba(0,0,0,.12);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--tx);font-family:'DM Mono',monospace;min-height:100vh;overflow:hidden;transition:background .3s,color .3s;}
+body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 70% 50% at 15% -5%,rgba(240,165,0,.06) 0%,transparent 55%),radial-gradient(ellipse 50% 40% at 85% 105%,rgba(74,158,255,.05) 0%,transparent 55%);pointer-events:none;z-index:0;}
+[data-theme="light"] body::before{opacity:.4;}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-thumb{background:var(--scr);border-radius:3px;}
+
+/* ── HEADER ── */
+header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:center;padding:0 18px;gap:10px;background:var(--hbg);backdrop-filter:blur(20px) saturate(1.4);border-bottom:1px solid var(--bd);transition:background .3s;}
+
+.logo{display:flex;align-items:center;gap:8px;flex-shrink:0;text-decoration:none;margin-top:5px;}
+.logo-text{display:flex;flex-direction:column;line-height:1;}
+.logo-name{font-family:'Syne',sans-serif;font-size:16px;font-weight:800;letter-spacing:-.3px;color:var(--tx);}
+.logo-name span{color:#0ea5e9;}
+.logo-tag{font-size:8px;font-weight:500;color:var(--tx3);letter-spacing:1.5px;text-transform:uppercase;margin-top:1px;}
+@keyframes pulse-ring{0%{box-shadow:0 0 0 0 var(--gold-glow);}60%{box-shadow:0 0 0 8px transparent;}100%{box-shadow:0 0 0 0 transparent;}}
+.logo-sep{width:1px;height:14px;background:var(--bd2);margin:0 2px;}
+.logo-sub{font-size:9px;font-weight:400;color:var(--tx3);letter-spacing:2px;text-transform:uppercase;}
+
+/* project title label */
+.proj-title-wrap{display:flex;align-items:center;gap:8px;flex:1;min-width:0;overflow:hidden;margin-left:8px;}
+.proj-title-sep{width:1px;height:20px;background:var(--bd2);flex-shrink:0;margin-right:4px;margin-left:-2px;}
+.proj-title-dot{width:7px;height:7px;border-radius:50%;background:var(--gold);box-shadow:0 0 8px var(--gold-glow);flex-shrink:0;animation:pulse-ring 2.4s ease-in-out infinite;}
+.proj-title-text{font-family:'Syne',sans-serif;font-size:14px;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.2px;}
+
+/* stage bar search */
+.stab-search-wrap{position:relative;margin-left:auto;flex-shrink:0;}
+.stab-search-input{width:720px;height:42px;padding:0 12px 0 30px;background:var(--sf);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-family:'DM Mono',monospace;font-size:11px;outline:none;transition:border-color .2s,background .2s;box-sizing:border-box;}
+.stab-search-input:focus{border-color:var(--gold);background:var(--sf2);}
+.stab-search-input::placeholder{color:var(--tx3);}
+.stab-search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--tx3);pointer-events:none;line-height:1;}
+
+.hright{display:flex;align-items:center;gap:6px;margin-left:auto;}
+
+/* traffic light chip */
+.chip{display:flex;align-items:center;gap:5px;padding:0 13px;height:42px;background:var(--sf);border:1px solid var(--bd);border-radius:10px;font-size:12px;color:var(--tx2);white-space:nowrap;flex-shrink:0;}
+.tl-item{display:flex;align-items:center;gap:4px;font-size:13px;font-weight:600;}
+.tl-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.tl-sep{color:var(--tx4);padding:0 1px;}
+
+/* budget */
+.budget-chip{display:flex;align-items:center;gap:6px;padding:0 13px;height:42px;background:var(--sf);border:1px solid var(--bd);border-radius:10px;font-size:12px;color:var(--tx2);white-space:nowrap;flex-shrink:0;}
+.b-earned{font-weight:700;color:var(--gold);font-size:13px;}
+.b-total{color:var(--tx3);}
+.b-bar-wrap{width:44px;height:3px;background:var(--bd2);border-radius:2px;overflow:hidden;}
+.b-bar-fill{height:100%;background:var(--gold);border-radius:2px;transition:width .5s ease;box-shadow:0 0 5px var(--gold-glow);}
+
+/* ── UNIFIED TIMER CHIP ── */
+.timer-chip{display:flex;align-items:center;height:42px;background:var(--sf);border:1px solid var(--bd);border-radius:10px;overflow:hidden;flex-shrink:0;white-space:nowrap;padding:0 2px;}
+.tc-block{display:flex;align-items:baseline;gap:3px;padding:0 8px;border-right:1px solid var(--bd);}
+.tc-block:last-child{border-right:none;}
+.tc-val{font-family:'Syne',sans-serif;font-weight:700;font-size:15px;line-height:1;color:var(--tx);white-space:nowrap;}
+.tc-val.warn{color:var(--yellow);}
+.tc-val.danger{color:var(--red);}
+.tc-lbl{font-size:11px;color:var(--tx3);white-space:nowrap;font-weight:400;}
+
+/* delay chip */
+.delay-chip{display:flex;align-items:center;height:42px;background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.25);border-radius:9px;overflow:hidden;flex-shrink:0;padding:0 2px;}
+.delay-chip.hidden{display:none;}
+.dc-block{display:flex;align-items:baseline;gap:3px;padding:0 8px;border-right:1px solid rgba(248,113,113,.2);}
+.dc-block:last-child{border-right:none;}
+.dc-val{font-family:'Syne',sans-serif;font-weight:700;font-size:15px;line-height:1;color:var(--red);white-space:nowrap;}
+.dc-lbl{font-size:11px;color:rgba(248,113,113,.6);white-space:nowrap;font-weight:400;}
+.delay-icon{padding:0 8px;font-size:11px;border-right:1px solid rgba(248,113,113,.2);color:var(--red);}
+
+/* start/stop */
+.btn-timer{padding:0 18px;height:42px;background:rgba(74,222,128,.15);border:1.5px solid rgba(74,222,128,.4);border-radius:9px;color:var(--green);font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;white-space:nowrap;flex-shrink:0;}
+.btn-timer:hover{background:rgba(74,222,128,.28);border-color:var(--green);transform:translateY(-1px);box-shadow:0 5px 18px rgba(74,222,128,.35);}
+.btn-timer.running{background:rgba(248,113,113,.15);border-color:rgba(248,113,113,.4);color:var(--red);}
+.btn-timer.running:hover{background:rgba(248,113,113,.28);border-color:var(--red);transform:translateY(-1px);box-shadow:0 5px 18px rgba(248,113,113,.35);}
+
+.theme-toggle{width:42px;height:42px;background:var(--sf);border:1px solid var(--bd);border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;transition:all .2s;flex-shrink:0;}
+.theme-toggle:hover{background:var(--sf2);border-color:var(--bd2);transform:translateY(-1px);box-shadow:0 5px 16px rgba(240,165,0,.25);}
+
+.btn-add{display:flex;align-items:center;gap:4px;padding:0 20px;height:42px;background:var(--gold);border:none;border-radius:9px;color:#000;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;box-shadow:0 3px 12px var(--gold-glow);white-space:nowrap;flex-shrink:0;}
+.btn-add:hover{background:var(--gold2);transform:translateY(-1px);box-shadow:0 5px 18px rgba(240,165,0,.5);}
+.btn-projects{display:flex;align-items:center;gap:5px;padding:0 18px;height:42px;background:linear-gradient(135deg,#2563eb,#0ea5e9);border:none;border-radius:9px;color:#fff;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;box-shadow:0 3px 12px rgba(14,165,233,.4);white-space:nowrap;flex-shrink:0;}
+.btn-projects:hover{background:linear-gradient(135deg,#3b82f6,#38bdf8);transform:translateY(-1px);box-shadow:0 5px 20px rgba(14,165,233,.6);}
+
+/* ── PROJECTS DROPDOWN ── */
+.proj-wrap{position:relative;flex-shrink:0;}
+.proj-dropdown{
+  position:absolute;top:calc(100% + 10px);right:0;left:auto;
+  min-width:260px;
+  background:var(--mbg);
+  border:1px solid var(--bd2);
+  border-radius:14px;
+  box-shadow:0 20px 60px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.04);
+  overflow:hidden;
+  z-index:300;
+  opacity:0;pointer-events:none;
+  transform:translateY(-8px) scale(.96);
+  transform-origin:top left;
+  transition:opacity .2s cubic-bezier(.4,0,.2,1),transform .2s cubic-bezier(.4,0,.2,1);
+}
+[data-theme="light"] .proj-dropdown{
+  box-shadow:0 12px 40px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06);
+  border-color:var(--bd2);
+}
+.proj-dropdown.open{opacity:1;pointer-events:all;transform:translateY(0) scale(1);}
+
+/* Header inside dropdown */
+.proj-dd-header{
+  padding:12px 16px 10px;
+  border-bottom:1px solid var(--bd);
+  background:linear-gradient(135deg,rgba(240,165,0,.06),transparent);
+}
+.proj-dd-header-label{font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:var(--tx3);font-family:'DM Mono',monospace;margin-bottom:2px;}
+.proj-dd-header-count{font-size:11px;color:var(--tx2);font-family:'DM Mono',monospace;}
+
+/* New project button */
+.proj-dd-new{
+  display:flex;align-items:center;gap:10px;
+  width:100%;padding:11px 16px;
+  background:transparent;border:none;
+  cursor:pointer;text-align:left;
+  transition:background .15s;
+  border-bottom:1px solid var(--bd);
+}
+.proj-dd-new:hover{background:var(--gold-dim);}
+.proj-dd-new-icon{
+  width:28px;height:28px;border-radius:7px;
+  background:var(--gold-dim);border:1px solid rgba(240,165,0,.3);
+  display:flex;align-items:center;justify-content:center;
+  font-size:18px;line-height:1;color:var(--gold);font-weight:400;flex-shrink:0;
+  transition:background .15s,transform .15s;
+  font-family:sans-serif;
+}
+.proj-dd-new:hover .proj-dd-new-icon{background:rgba(240,165,0,.2);}
+.proj-dd-new-text{display:flex;flex-direction:column;gap:1px;}
+.proj-dd-new-label{font-family:'Syne',sans-serif;font-size:12px;font-weight:700;color:var(--gold);}
+.proj-dd-new-sub{font-size:10px;color:var(--tx3);font-family:'DM Mono',monospace;}
+
+/* Project list */
+.proj-dd-list-label{
+  padding:8px 16px 4px;
+  font-size:9px;text-transform:uppercase;letter-spacing:1.5px;
+  color:var(--tx4);font-family:'DM Mono',monospace;
+}
+.proj-dd-item{
+  display:flex;align-items:center;
+  width:100%;
+  background:transparent;border:none;
+  cursor:pointer;
+  transition:background .15s;
+  position:relative;
+}
+.proj-dd-item:hover{background:var(--sf2);}
+.proj-dd-item.active-proj{background:linear-gradient(90deg,rgba(14,165,233,.08),transparent);}
+.proj-dd-item.active-proj::before{
+  content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(135deg,#2563eb,#0ea5e9);border-radius:0 2px 2px 0;
+}
+
+.proj-dd-icon-wrap{
+  width:32px;height:32px;border-radius:8px;
+  background:var(--sf2);border:1px solid var(--bd);
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;flex-shrink:0;margin:8px 0 8px 14px;
+  transition:border-color .15s;
+}
+.proj-dd-item.active-proj .proj-dd-icon-wrap{
+  background:linear-gradient(135deg,rgba(37,99,235,.15),rgba(14,165,233,.15));
+  border-color:rgba(14,165,233,.3);
+}
+.proj-dd-item:hover .proj-dd-icon-wrap{border-color:var(--bd2);}
+
+.proj-dd-info{flex:1;padding:8px 10px 8px 10px;min-width:0;}
+.proj-dd-name{
+  font-family:'Syne',sans-serif;font-size:12px;font-weight:600;
+  color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  display:block;
+}
+.proj-dd-item.active-proj .proj-dd-name{color:#38bdf8;}
+.proj-dd-meta{font-size:10px;color:var(--tx3);font-family:'DM Mono',monospace;margin-top:1px;}
+
+.proj-dd-gear{
+  width:32px;height:32px;
+  background:transparent;border:none;border-radius:7px;
+  color:var(--tx3);font-size:16px;
+  cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  line-height:32px;
+  transition:color .15s,background .15s;
+  flex-shrink:0;margin-right:10px;
+  padding:0;
+}
+.proj-dd-gear:hover{color:var(--gold);background:var(--gold-dim);}
+.proj-dd-gear svg,.proj-dd-gear *{display:block;margin:auto;}
+
+/* ── PROJECT SETTINGS MODAL ── */
+.proj-settings-modal{
+  width:460px;max-width:95vw;
+  background:var(--mbg);
+  border:1px solid var(--bd2);
+  border-radius:20px;
+  padding:0;
+  display:flex;flex-direction:column;
+  overflow:hidden;
+  box-shadow:0 24px 80px rgba(0,0,0,.6);
+  transform:translateY(14px) scale(.97);
+  transition:transform .25s cubic-bezier(.34,1.3,.64,1),background .3s;
+}
+.overlay.open .proj-settings-modal{transform:translateY(0) scale(1);}
+
+.ps-header{
+  display:flex;align-items:center;gap:12px;
+  padding:20px 22px 16px;
+  border-bottom:1px solid var(--bd);
+}
+.ps-icon{
+  width:36px;height:36px;border-radius:9px;
+  background:var(--sf2);border:1px solid var(--bd2);
+  display:flex;align-items:center;justify-content:center;
+  font-size:16px;flex-shrink:0;
+}
+.ps-title{font-family:'Syne',sans-serif;font-size:15px;font-weight:700;color:var(--tx);}
+.ps-sub{font-size:11px;color:var(--tx3);margin-top:2px;}
+
+.ps-body{padding:22px;display:flex;flex-direction:column;gap:16px;}
+
+.ps-field{display:flex;flex-direction:column;gap:6px;}
+.ps-label{font-size:10px;color:var(--tx3);text-transform:uppercase;letter-spacing:1px;font-family:'DM Mono',monospace;}
+.ps-input{
+  height:40px;padding:0 14px;
+  background:var(--sf2);border:1px solid var(--bd);border-radius:10px;
+  color:var(--tx);font-family:'DM Mono',monospace;font-size:13px;
+  outline:none;transition:border-color .15s,background .15s;
+}
+.ps-input:focus{border-color:var(--gold);background:var(--sf3);}
+.ps-input-group{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+
+.ps-budget-wrap{position:relative;}
+.ps-budget-prefix{
+  position:absolute;left:14px;top:50%;transform:translateY(-50%);
+  font-size:13px;color:var(--tx3);pointer-events:none;
+}
+.ps-input.has-prefix{padding-left:28px;}
+
+.ps-footer{
+  display:flex;align-items:center;gap:8px;
+  padding:16px 22px;border-top:1px solid var(--bd);
+}
+.btn-delete-proj{
+  padding:0 16px;height:38px;
+  background:rgba(239,68,68,.15);border:1.5px solid rgba(239,68,68,.5);
+  color:#ef4444;border-radius:9px;
+  font-family:'Syne',sans-serif;font-size:12px;font-weight:700;
+  cursor:pointer;transition:all .2s;
+}
+.btn-delete-proj:hover{
+  background:#ef4444;color:#fff;
+  border-color:#ef4444;
+  box-shadow:0 4px 16px rgba(239,68,68,.45);
+  transform:translateY(-1px);
+}
+.btn-delete-proj.hidden{display:none;}
+
+.btn-cancel{
+  padding:0 20px;height:38px;
+  background:rgba(248,113,113,.12);border:1.5px solid rgba(248,113,113,.4);
+  color:var(--red);border-radius:9px;
+  font-family:'Syne',sans-serif;font-size:12px;font-weight:700;
+  cursor:pointer;transition:all .2s;
+}
+.btn-cancel:hover{
+  background:rgba(248,113,113,.25);border-color:var(--red);
+  transform:translateY(-1px);box-shadow:0 4px 14px rgba(248,113,113,.25);
+}
+.btn-create{
+  padding:0 20px;height:38px;
+  background:rgba(74,222,128,.15);border:1.5px solid rgba(74,222,128,.45);
+  color:var(--green);border-radius:9px;
+  font-family:'Syne',sans-serif;font-size:12px;font-weight:700;
+  cursor:pointer;transition:all .2s;
+}
+.btn-create:hover{
+  background:rgba(74,222,128,.28);border-color:var(--green);
+  transform:translateY(-1px);box-shadow:0 4px 14px rgba(74,222,128,.25);
+}
+
+/* progress */
+.progress{height:2px;background:var(--bd);z-index:99;position:relative;}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold2));box-shadow:0 0 8px var(--gold-glow);transition:width .6s ease;}
+
+/* ── STAGE BAR ── */
+.stage-bar{display:flex;align-items:center;gap:6px;padding:0 18px;height:64px;background:var(--hbg);backdrop-filter:blur(12px);border-bottom:1px solid var(--bd);overflow-x:auto;overflow-y:hidden;position:sticky;top:64px;z-index:98;transition:background .3s;}
+.stage-bar::-webkit-scrollbar{height:0;width:0;}
+.stab{display:flex;align-items:center;gap:6px;padding:0 13px;height:42px;border-radius:9px;border:1.5px solid var(--bd);background:var(--sf);color:var(--tx2);font-family:'DM Mono',monospace;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;transition:all .18s;flex-shrink:0;}
+.stab:hover{background:var(--sf2);border-color:var(--bd2);color:var(--tx);}
+.stab.active{font-weight:600;box-shadow:0 2px 10px rgba(0,0,0,.2);}
+/* Force text visible on active "all" tab in both themes */
+.stab[data-stage="all"].active{color:#000 !important;}
+[data-theme="dark"] .stab[data-stage="all"].active{color:#000 !important;}
+.stab.active:not([data-stage="all"]){color:#fff !important;}
+.stab .cnt{font-size:10px;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,.18);}
+[data-theme="light"] .stab.active .cnt{background:rgba(0,0,0,.15);}
+[data-theme="light"] .stab[data-stage="all"].active .cnt{background:rgba(0,0,0,.12);}
+
+/* ── BOARD ── */
+.board-outer{position:relative;z-index:10;height:calc(100vh - 138px);overflow:hidden;}
+.board{display:flex;gap:10px;height:100%;padding:14px 14px 0;overflow-x:hidden;overflow-y:hidden;}
+
+/* ── COLUMN ── */
+.col{flex:1 1 0;min-width:220px;display:flex;flex-direction:column;background:var(--sf);border:1px solid var(--bd);border-radius:14px;overflow:hidden;transition:box-shadow .15s,border-color .15s;}
+.col-head{display:flex;align-items:center;justify-content:space-between;padding:11px 13px 9px;border-bottom:1px solid var(--bd);flex-shrink:0;}
+.col-label{font-family:'Syne',sans-serif;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--tx3);}
+.col-cnt{font-size:10px;color:var(--tx3);background:var(--sf2);border:1px solid var(--bd);padding:2px 7px;border-radius:5px;}
+.col-body{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:7px;}
+.col-footer{padding:6px 8px 8px;flex-shrink:0;}
+.col-add-btn{width:100%;padding:7px;background:transparent;border:1.5px dashed var(--bd2);border-radius:8px;color:var(--tx3);font-family:'DM Mono',monospace;font-size:11px;cursor:pointer;text-align:center;transition:all .18s;}
+.col-add-btn:hover{border-color:var(--gold);color:var(--gold);background:var(--gold-dim);}
+.col-empty{padding:16px 10px;text-align:center;color:var(--tx4);font-size:11px;line-height:1.8;border:1.5px dashed var(--bd);border-radius:8px;}
+
+/* ── CARD ── */
+.card{background:var(--sf2);border:1px solid var(--bd);border-radius:11px;padding:11px 12px 11px 14px;cursor:grab;transition:all .2s cubic-bezier(.4,0,.2,1);position:relative;display:flex;flex-direction:column;gap:7px;}
+.card:hover{background:var(--sf3);border-color:var(--bd2);transform:translateY(-2px);box-shadow:var(--sh);}
+.card-strip{position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:11px 0 0 11px;}
+/* ROW 1: id + size */
+.card-r1{display:flex;align-items:center;justify-content:space-between;gap:6px;}
+.card-id{font-size:10px;color:var(--tx3);font-weight:500;letter-spacing:.3px;}
+.size-pill{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:.5px;flex-shrink:0;}
+/* ROW 2: title */
+.card-title{font-family:'Syne',sans-serif;font-size:13px;font-weight:600;line-height:1.45;color:var(--tx);}
+/* ROW 3: agent + track + hours — always visible */
+.card-r3{display:flex;align-items:center;gap:5px;flex-wrap:nowrap;}
+.agent-pill{font-size:10px;font-weight:500;padding:2px 7px;border-radius:5px;border:1px solid transparent;flex-shrink:0;white-space:nowrap;}
+.track-lbl{font-size:10px;color:var(--tx3);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+.hours-lbl{font-size:10px;color:var(--tx4);white-space:nowrap;margin-left:auto;flex-shrink:0;}
+
+/* ── OVERLAYS ── */
+.overlay{position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.65);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s ease;}
+.overlay.open{opacity:1;pointer-events:all;}
+
+/* ── TASK MODAL ── */
+.task-modal{width:800px;max-width:95vw;max-height:90vh;background:var(--mbg);border:1px solid var(--bd2);border-radius:20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:var(--sh-lg);transform:translateY(14px) scale(.97);transition:transform .25s cubic-bezier(.34,1.3,.64,1),background .3s;}
+.overlay.open .task-modal{transform:translateY(0) scale(1);}
+.tm-hd{display:flex;align-items:flex-start;gap:13px;padding:20px 22px 16px;border-bottom:1px solid var(--bd);flex-shrink:0;}
+.tm-badge{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;font-size:10px;font-weight:800;letter-spacing:.5px;flex-shrink:0;margin-top:2px;}
+.tm-meta{flex:1;}
+.tm-id{font-size:10px;color:var(--tx3);margin-bottom:4px;letter-spacing:.4px;}
+.tm-title{font-family:'Syne',sans-serif;font-size:18px;font-weight:700;line-height:1.4;color:var(--tx);}
+.tm-close{width:32px;height:32px;background:var(--sf2);border:1px solid var(--bd);border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--tx2);transition:all .15s;flex-shrink:0;}
+.tm-close:hover{background:var(--sf3);color:var(--tx);border-color:var(--bd2);}
+.tm-body{flex:1;overflow-y:auto;padding:18px 22px;display:flex;flex-direction:column;gap:18px;}
+.meta-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;}
+.mc{background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:10px 12px;}
+.mc-lbl{font-size:9px;color:var(--tx3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;}
+.mc-val{font-size:13px;font-weight:500;color:var(--tx);}
+.mc-full{grid-column:1/-1;}
+.status-sel{width:100%;background:transparent;border:none;color:var(--tx);font-family:'DM Mono',monospace;font-size:13px;font-weight:500;cursor:pointer;outline:none;-webkit-appearance:none;}
+.status-sel option{background:#1a1f2e;}
+[data-theme="light"] .status-sel option{background:#e8ebf4;color:#1a1f2e;}
+.sec-h{display:flex;align-items:center;gap:8px;font-family:'Syne',sans-serif;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--tx3);margin-bottom:8px;}
+.sec-h::after{content:'';flex:1;height:1px;background:var(--bd);}
+.tm-desc{font-size:13px;line-height:1.8;color:var(--tx2);}
+
+/* ── AI BOXES (shared) ── */
+.ai-box{border:1px solid var(--bd);border-radius:13px;overflow:hidden;background:var(--sf);}
+.ai-hd{display:flex;align-items:center;gap:9px;padding:10px 14px;border-bottom:1px solid var(--bd);background:linear-gradient(90deg,rgba(240,165,0,.07),transparent);}
+.ai-orb{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,var(--gold),#e06b00);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#000;flex-shrink:0;box-shadow:0 0 12px rgba(240,165,0,.4);}
+.ai-name{font-family:'Syne',sans-serif;font-size:12px;font-weight:700;color:var(--tx);}
+.ai-role{font-size:10px;color:var(--tx3);margin-top:1px;}
+.ai-msgs{min-height:100px;max-height:200px;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:9px;}
+.msg{display:flex;gap:8px;}
+.msg.user{flex-direction:row-reverse;}
+.msg-av{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0;margin-top:2px;}
+.msg-av.ai{background:linear-gradient(135deg,var(--gold),#e06b00);color:#000;}
+.msg-av.usr{background:var(--sf3);color:var(--tx2);border:1px solid var(--bd2);}
+.msg-bub{padding:8px 12px;border-radius:9px;max-width:calc(100% - 34px);font-size:12px;line-height:1.65;}
+.msg.ai .msg-bub{background:var(--sf2);border:1px solid var(--bd);color:var(--tx2);}
+.msg.user .msg-bub{background:var(--gold-dim);border:1px solid rgba(240,165,0,.2);color:var(--tx);}
+.typing{display:flex;gap:3px;padding:3px 0;align-items:center;}
+.typing span{width:4px;height:4px;border-radius:50%;background:var(--tx3);animation:blink 1.2s infinite;}
+.typing span:nth-child(2){animation-delay:.2s;}
+.typing span:nth-child(3){animation-delay:.4s;}
+@keyframes blink{0%,60%,100%{opacity:.3;transform:scale(1)}30%{opacity:1;transform:scale(1.3)}}
+.ai-row{display:flex;border-top:1px solid var(--bd);}
+.ai-ta{flex:1;background:transparent;border:none;padding:10px 13px;color:var(--tx);font-family:'DM Mono',monospace;font-size:12px;outline:none;resize:none;min-height:42px;max-height:100px;}
+.ai-ta::placeholder{color:var(--tx3);}
+.ai-send{background:var(--gold);border:none;color:#000;padding:10px 16px;font-family:'Syne',sans-serif;font-size:12px;font-weight:700;cursor:pointer;transition:background .15s;}
+.ai-send:hover{background:var(--gold2);}
+.ai-send:disabled{opacity:.4;cursor:not-allowed;}
+
+/* ── NEW TASK MODAL ── */
+.nt-modal{width:660px;max-width:95vw;max-height:95vh;background:var(--mbg);border:1px solid var(--bd2);border-radius:20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:var(--sh-lg);transform:translateY(14px) scale(.97);transition:transform .25s cubic-bezier(.34,1.3,.64,1),background .3s;}
+.overlay.open .nt-modal{transform:translateY(0) scale(1);}
+
+.nt-hd{padding:18px 20px 14px;border-bottom:1px solid var(--bd);display:flex;align-items:center;gap:12px;flex-shrink:0;}
+.nt-orb{width:36px;height:36px;border-radius:9px;background:linear-gradient(135deg,var(--gold),#e06b00);display:flex;align-items:center;justify-content:center;font-size:16px;color:#000;font-weight:700;box-shadow:0 0 14px rgba(240,165,0,.4);flex-shrink:0;}
+.nt-title{font-family:'Syne',sans-serif;font-size:15px;font-weight:700;color:var(--tx);}
+.nt-sub{font-size:11px;color:var(--tx3);margin-top:2px;}
+
+/* chat area */
+.nt-chat{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;min-height:260px;max-height:546px;}
+
+/* task preview */
+.task-preview{margin:0 16px 12px;background:var(--sf);border:1.5px solid var(--bd2);border-radius:12px;padding:14px;display:none;flex-direction:column;gap:10px;animation:fadein .3s ease;}
+.task-preview.show{display:flex;}
+@keyframes fadein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.pv-header{font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--tx);}
+.pv-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
+.pv-chip{background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;}
+.pv-chip-lbl{font-size:9px;color:var(--tx3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;}
+.pv-chip-val{font-size:12px;font-weight:600;color:var(--tx);}
+.pv-desc{font-size:11px;color:var(--tx2);line-height:1.65;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;}
+.pv-actions{display:flex;gap:8px;justify-content:flex-end;}
+.btn-confirm{padding:8px 18px;background:var(--gold);border:none;border-radius:8px;color:#000;font-family:'Syne',sans-serif;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 10px var(--gold-glow);transition:all .15s;}
+.btn-confirm:hover{background:var(--gold2);}
+.btn-revise{padding:8px 14px;background:var(--sf2);border:1px solid var(--bd2);border-radius:8px;color:var(--tx2);font-family:'Syne',sans-serif;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;}
+.btn-revise:hover{border-color:var(--bd3);color:var(--tx);}
+
+.nt-input-row{display:flex;border-top:1px solid var(--bd);flex-shrink:0;}
+.nt-ta{flex:1;background:transparent;border:none;padding:13px 15px;color:var(--tx);font-family:'DM Mono',monospace;font-size:13px;outline:none;resize:none;min-height:50px;max-height:130px;}
+.nt-ta::placeholder{color:var(--tx3);}
+.nt-send{background:var(--gold);border:none;color:#000;padding:13px 20px;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;transition:background .15s;}
+.nt-send:hover{background:var(--gold2);}
+.nt-send:disabled{opacity:.4;cursor:not-allowed;}
+
+
+/* ── IMPORT MODAL ── */
+.btn-import{display:flex;align-items:center;gap:5px;padding:0 16px;height:42px;background:var(--sf);border:1.5px solid var(--bd2);border-radius:9px;color:var(--tx2);font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;white-space:nowrap;flex-shrink:0;}
+.btn-import:hover{background:var(--sf2);border-color:var(--bd2);color:var(--tx);transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,.2);}
+
+.import-modal{width:600px;max-width:96vw;background:var(--mbg);border:1px solid var(--bd2);border-radius:20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.6);transform:translateY(14px) scale(.97);transition:transform .25s cubic-bezier(.34,1.3,.64,1),background .3s;max-height:90vh;}
+.overlay.open .import-modal{transform:translateY(0) scale(1);}
+
+.imp-tabs{display:flex;gap:4px;padding:10px 16px 0;border-bottom:1px solid var(--bd);}
+.imp-tab{padding:8px 16px;border-radius:8px 8px 0 0;border:1px solid transparent;border-bottom:none;background:transparent;color:var(--tx3);font-family:'Syne',sans-serif;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;margin-bottom:-1px;}
+.imp-tab.active{background:var(--mbg);border-color:var(--bd);color:var(--gold);}
+.imp-tab:hover:not(.active){color:var(--tx2);background:var(--sf);}
+
+.imp-pane{padding:18px 20px;}
+
+.imp-drop-zone{border:2px dashed var(--bd2);border-radius:12px;padding:32px 20px;text-align:center;cursor:pointer;transition:all .2s;}
+.imp-drop-zone:hover,.imp-drop-zone.drag-active{border-color:var(--gold);background:var(--gold-dim);}
+.imp-drop-icon{font-size:36px;margin-bottom:10px;}
+.imp-drop-label{font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--tx);margin-bottom:4px;}
+.imp-drop-sub{font-size:11px;color:var(--tx3);}
+
+.imp-file-hint{margin-top:12px;padding:10px 14px;background:var(--sf2);border-radius:8px;font-size:11px;color:var(--tx2);font-family:'DM Mono',monospace;line-height:1.6;}
+
+.imp-textarea{width:100%;height:160px;background:var(--sf2);border:1px solid var(--bd);border-radius:10px;color:var(--tx);font-family:'DM Mono',monospace;font-size:12px;padding:12px;outline:none;resize:vertical;transition:border-color .15s;box-sizing:border-box;line-height:1.6;}
+.imp-textarea:focus{border-color:var(--gold);}
+
+.imp-preview-header{display:flex;align-items:center;justify-content:space-between;padding:10px 20px 6px;font-family:'Syne',sans-serif;font-size:12px;font-weight:700;color:var(--tx2);}
+.imp-clear-btn{background:transparent;border:none;color:var(--tx3);font-size:11px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:all .15s;}
+.imp-clear-btn:hover{color:var(--red);background:rgba(248,113,113,.1);}
+.imp-preview-list{max-height:260px;overflow-y:auto;padding:0 20px 16px;display:flex;flex-direction:column;gap:5px;}
+.imp-task-row{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--sf);border:1px solid var(--bd);border-radius:8px;font-size:11px;font-family:'DM Mono',monospace;}
+.imp-task-stage{padding:2px 7px;border-radius:5px;font-size:10px;font-weight:700;color:#fff;flex-shrink:0;}
+.imp-task-title{flex:1;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.imp-task-meta{color:var(--tx3);flex-shrink:0;font-size:10px;}
+
+/* ── DRAG & DROP ── */
+.card{cursor:grab;}
+.card:active{cursor:grabbing;}
+.card.dragging{
+  opacity:.45;
+  transform:rotate(1.5deg) scale(1.03);
+  box-shadow:0 12px 40px rgba(0,0,0,.5);
+  pointer-events:none;
+  z-index:1000;
+}
+.col-body.drag-over{
+  background:var(--gold-dim);
+  border-radius:10px;
+  outline:2px dashed var(--gold);
+  outline-offset:-4px;
+}
+.col.drag-over-col{
+  border-color:var(--gold);
+  box-shadow:0 0 0 2px var(--gold-glow);
+}
+.card-drop-indicator{
+  height:4px;
+  background:var(--gold);
+  border-radius:2px;
+  margin:2px 0;
+  box-shadow:0 0 8px var(--gold-glow);
+  animation:indicator-pulse .6s ease infinite alternate;
+}
+@keyframes indicator-pulse{from{opacity:.6}to{opacity:1}}
+</style>
+</head>
+<body>
+
+<header>
+  <!-- Logo -->
+  <a class="logo" href="#">
+    <div class="logo-text">
+      <div class="logo-name">Plan<span>Kanban</span><span style="color:var(--gold)">24</span></div>
+      <div class="logo-tag">project board</div>
+    </div>
+  </a>
+
+  <!-- Current project title (right after logo with larger gap) -->
+  <div class="proj-title-wrap">
+    <div class="proj-title-sep"></div>
+    <div class="proj-title-dot"></div>
+    <div class="proj-title-text" id="proj-title-label">mossb.ru — B2B платформа</div>
+  </div>
+
+  <div class="hright">
+    <!-- Traffic light -->
+    <div class="chip">
+      <div class="tl-item"><div class="tl-dot" style="background:var(--green);box-shadow:0 0 5px var(--green)"></div><span id="tl-done" style="color:var(--green)">0</span></div>
+      <span class="tl-sep">/</span>
+      <div class="tl-item"><div class="tl-dot" style="background:var(--yellow);box-shadow:0 0 5px var(--yellow)"></div><span id="tl-wip" style="color:var(--yellow)">0</span></div>
+      <span class="tl-sep">/</span>
+      <div class="tl-item"><div class="tl-dot" style="background:var(--red);box-shadow:0 0 5px var(--red)"></div><span id="tl-back" style="color:var(--red)">149</span></div>
+    </div>
+
+    <!-- Budget -->
+    <div class="budget-chip">
+      <span style="opacity:.6;font-size:12px">⚡</span>
+      <span class="b-earned" id="b-earned">0 ₽</span>
+      <span class="b-total">/ 5.1M ₽</span>
+      <div class="b-bar-wrap"><div class="b-bar-fill" id="b-bar" style="width:0%"></div></div>
+    </div>
+
+    <!-- Project timer -->
+    <div class="timer-chip" id="proj-timer">
+      <div class="tc-block">
+        <div class="tc-val" id="t-weeks">0</div>
+        <div class="tc-lbl">/ 50 нед</div>
+      </div>
+      <div class="tc-block">
+        <div class="tc-val" id="t-days">0</div>
+        <div class="tc-lbl">день</div>
+      </div>
+      <div class="tc-block">
+        <div class="tc-val" id="t-time">00:00</div>
+        <div class="tc-lbl">время</div>
+      </div>
+    </div>
+
+    <!-- Client delay timer -->
+    <div class="delay-chip hidden" id="delay-chip">
+      <div class="delay-icon">⏸</div>
+      <div class="dc-block">
+        <div class="dc-val" id="d-weeks">0</div>
+        <div class="dc-lbl">нед</div>
+      </div>
+      <div class="dc-block">
+        <div class="dc-val" id="d-days">0</div>
+        <div class="dc-lbl">день</div>
+      </div>
+      <div class="dc-block">
+        <div class="dc-val" id="d-time">00:00</div>
+        <div class="dc-lbl">время</div>
+      </div>
+    </div>
+
+    <button class="btn-timer" id="btn-timer" onclick="toggleTimer()">▶ Старт</button>
+    <button class="theme-toggle" id="theme-btn" onclick="toggleTheme()">🌙</button>
+    <button class="btn-import" onclick="openImport()">📥 Импорт</button>
+    <button class="btn-add" onclick="openNewTask()">＋ Задача</button>
+
+    <!-- Projects dropdown — rightmost -->
+    <div class="proj-wrap" id="proj-wrap">
+      <button class="btn-projects" onclick="toggleProjMenu(event)">⊞ Проекты</button>
+      <div class="proj-dropdown" id="proj-dropdown">
+        <button class="proj-dd-new" onclick="openNewProjectModal()">
+          <div class="proj-dd-new-icon"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><line x1="6" y1="1" x2="6" y2="11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="1" y1="6" x2="11" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div>
+          <div class="proj-dd-new-text">
+            <div class="proj-dd-new-label">Новый проект</div>
+            <div class="proj-dd-new-sub">Создать рабочее пространство</div>
+          </div>
+        </button>
+        <div id="proj-list"></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="progress"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+
+<div class="stage-bar" id="stage-bar">
+  <!-- Dynamic stage tabs rendered by renderStageTabs() -->
+  <div class="stab-search-wrap">
+    <span class="stab-search-icon">⌕</span>
+    <input class="stab-search-input" id="search-input" placeholder="Поиск задач, ID, агента..." oninput="onSearch(this.value)">
+  </div>
+</div>
+
+<div class="board-outer">
+  <div class="board" id="board"></div>
+</div>
+
+<!-- TASK VIEW MODAL -->
+<div class="overlay" id="task-ov" onclick="if(event.target===this)closeTask()">
+  <div class="task-modal">
+    <div class="tm-hd">
+      <div class="tm-badge" id="tm-badge"></div>
+      <div class="tm-meta">
+        <div class="tm-id" id="tm-id"></div>
+        <div class="tm-title" id="tm-title"></div>
+      </div>
+      <button class="tm-close" onclick="closeTask()">✕</button>
+    </div>
+    <div class="tm-body">
+      <div class="meta-grid" id="tm-meta"></div>
+      <div><div class="sec-h">Описание</div><div class="tm-desc" id="tm-desc"></div></div>
+      <div>
+        <div class="sec-h">AI-ассистент</div>
+        <div class="ai-box">
+          <div class="ai-hd"><div class="ai-orb">✦</div><div><div class="ai-name">Claude</div><div class="ai-role">Tech Lead · mossb.ru</div></div></div>
+          <div class="ai-msgs" id="ai-msgs"></div>
+          <div class="ai-row">
+            <textarea class="ai-ta" id="ai-in" placeholder="Декомпозиция, API, схема БД, промпт для Cursor..."
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMsg()}"
+              oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,100)+'px'"></textarea>
+            <button class="ai-send" id="ai-btn" onclick="sendMsg()">→</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- NEW TASK MODAL -->
+<div class="overlay" id="nt-ov" onclick="if(event.target===this)closeNewTask()">
+  <div class="nt-modal">
+    <div class="nt-hd">
+      <div class="nt-orb">✦</div>
+      <div>
+        <div class="nt-title">Claude — Tech Lead</div>
+        <div class="nt-sub">Обсудите задачу в чате. Я сам оценю, назначу и оформлю.</div>
+      </div>
+      <button class="tm-close" style="margin-left:auto" onclick="closeNewTask()">✕</button>
+    </div>
+    <div class="nt-chat" id="nt-chat"></div>
+    <div class="task-preview" id="task-preview">
+      <div class="pv-header" id="pv-title"></div>
+      <div class="pv-grid" id="pv-grid"></div>
+      <div class="pv-desc" id="pv-desc"></div>
+      <div class="pv-actions">
+        <button class="btn-revise" onclick="reviseTask()">↩ Уточнить</button>
+        <button class="btn-confirm" onclick="confirmTask()">✓ Добавить в Backlog</button>
+      </div>
+    </div>
+    <div class="nt-input-row">
+      <textarea class="nt-ta" id="nt-ta" placeholder="Напишите что нужно сделать..."
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendNewTask()}"
+        oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,130)+'px'"></textarea>
+      <button class="nt-send" id="nt-btn" onclick="sendNewTask()">→</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+// ════════════════════════════════════════════
+// CONSTANTS
+// ════════════════════════════════════════════
+const COLS=[{id:'backlog',label:'Backlog'},{id:'todo',label:'To Do'},{id:'inprogress',label:'In Progress'},{id:'review',label:'Review'},{id:'done',label:'Done'}];
+const STAGE_BUDGETS={A:790000,R1:1145000,'R1.1':745000,R2:1260000,'R2+':0,'R3+':635000,'R4+':0,F:525000};
+const TOTAL_BUDGET=5100000;
+const SC={A:'#4a9eff',R1:'#a78bfa','R1.1':'#fb923c',R2:'#f87171','R2+':'#f87171','R3+':'#4ade80','R4+':'#4ade80',F:'#22d3ee'};
+const SZC={XL:'#f87171',L:'#fb923c',M:'#fbbf24',S:'#4ade80'};
+const AGC={Claude:'#f0a500',Cursor:'#4a9eff',Codex:'#a78bfa','v0.dev':'#22d3ee','Николай':'#4ade80'};
+const STAB_C={'all':null,A:'#4a9eff',R1:'#a78bfa','R1.1':'#fb923c',R2:'#f87171','R3+':'#4ade80',F:'#22d3ee'};
+
+// ── DnD state (declared early so all functions can reference) ──
+let dragId=null, isDragging=false, dragSourceCol=null;
+
+const GREETINGS=['Привет! Что нужно сделать?','Здравствуйте! Какую задачу обсудим?','Привет, Николай. Что ставим сегодня?','Готов к работе. Опишите задачу.','Слушаю. Что нужно реализовать?'];
+const DEFAULT_TASKS = [{"id": "E0-01", "title": "Зафиксировать границы работ и состав релизов (Scope & Releases)", "stage": "A", "track": "PM/Scope", "deps": "", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: PM/Scope. Зависимости: нет.", "agent": "Николай"}, {"id": "E0-02", "title": "Матрица покрытия сценариев: Scenario → Feature → Screen/API", "stage": "A", "track": "PM/Scope", "deps": "E0-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: PM/Scope. Зависимости: E0-01.", "agent": "Николай"}, {"id": "E0-03", "title": "KPI/метрики продукта и схема событий аналитики", "stage": "A", "track": "PM/Analytics", "deps": "E0-01", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: PM/Analytics. Зависимости: E0-01.", "agent": "Николай"}, {"id": "E0-04", "title": "NFR-пороги (p95, error_rate, деградации) и методика замера", "stage": "A", "track": "NFR", "deps": "E0-01", "size": "M", "hours": 48, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: NFR. Зависимости: E0-01.", "agent": "Claude"}, {"id": "E0-05", "title": "Контуры данных/обмена: 1С/ERP, поставщики, EDI/ЭДО, CRM", "stage": "A", "track": "Integrations", "deps": "E0-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E0-01.", "agent": "Claude"}, {"id": "E0-06", "title": "Сущности интеграций и ключи идентификации (SKU/цены/остатки/сроки/заказы/доки)", "stage": "A", "track": "Integrations", "deps": "E0-05", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E0-05.", "agent": "Claude"}, {"id": "E0-07", "title": "Типы интеграций: API, пакетный импорт, EDI, webhooks, внешний API", "stage": "A", "track": "Integrations", "deps": "E0-05", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E0-05.", "agent": "Claude"}, {"id": "E0-08", "title": "Выбор стека и принципов хранения (PG/ES/Redis/S3/Queue) + ADR", "stage": "A", "track": "Architecture", "deps": "E0-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Architecture. Зависимости: E0-01.", "agent": "Claude"}, {"id": "E0-09", "title": "Разделение данных по хранилищам и правила источника правды", "stage": "A", "track": "Architecture", "deps": "E0-08", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Architecture. Зависимости: E0-08.", "agent": "Claude"}, {"id": "E0-10", "title": "Repo, ветвление, правила PR, линтеры/форматтеры", "stage": "A", "track": "Dev", "deps": "E0-08", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Dev. Зависимости: E0-08.", "agent": "Cursor"}, {"id": "E0-11", "title": "Окружения dev/stage/prod + базовый CI/CD", "stage": "A", "track": "DevOps", "deps": "E0-10", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: DevOps. Зависимости: E0-10.", "agent": "Cursor"}, {"id": "E0-12", "title": "Миграции БД с откатом, секреты, базовые бэкапы", "stage": "A", "track": "DevOps", "deps": "E0-11", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: DevOps. Зависимости: E0-11.", "agent": "Cursor"}, {"id": "E0-13", "title": "Наблюдаемость v0: request_id, метрики, логи, алерты (скелет)", "stage": "A", "track": "Observability", "deps": "E0-11", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Observability. Зависимости: E0-11.", "agent": "Cursor"}, {"id": "E0-14", "title": "План релизов и критерии приемки этапов", "stage": "A", "track": "PM/QA", "deps": "E0-01, E0-02", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: PM/QA. Зависимости: E0-01, E0-02.", "agent": "Николай"}, {"id": "E1-01", "title": "Визуальная стратегия B2B cockpit (плотность/скорость/табличность)", "stage": "A", "track": "Design", "deps": "", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Design. Зависимости: нет.", "agent": "v0.dev"}, {"id": "E1-02", "title": "Типографика (шкала, правила, моно для артикулов)", "stage": "A", "track": "Design", "deps": "E1-01", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Design. Зависимости: E1-01.", "agent": "v0.dev"}, {"id": "E1-03", "title": "Цветовая стратегия + семантика статусов (меньше красного)", "stage": "A", "track": "Design", "deps": "E1-01", "size": "S", "hours": 32, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Design. Зависимости: E1-01.", "agent": "v0.dev"}, {"id": "E1-04", "title": "Light/Dark темы на токенах", "stage": "A", "track": "Design", "deps": "E1-03", "size": "M", "hours": 48, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Design. Зависимости: E1-03.", "agent": "v0.dev"}, {"id": "E1-05", "title": "Требования к тяжёлым интерфейсам: таблицы/виртуализация/плотность", "stage": "A", "track": "Design", "deps": "E1-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Design. Зависимости: E1-01.", "agent": "v0.dev"}, {"id": "E1-06", "title": "UI-токены/variables (экспортопригодные)", "stage": "A", "track": "Design", "deps": "E1-02, E1-04", "size": "M", "hours": 48, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Design. Зависимости: E1-02, E1-04.", "agent": "v0.dev"}, {"id": "E1-07", "title": "Сетка/отступы/плотность (8pt/4pt)", "stage": "A", "track": "Design", "deps": "E1-06", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Design. Зависимости: E1-06.", "agent": "v0.dev"}, {"id": "E1-08", "title": "Компоненты UI-kit (кнопки/поля/селекты/автокомплит/маски/datepicker)", "stage": "A", "track": "Design", "deps": "E1-06", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Design. Зависимости: E1-06.", "agent": "v0.dev"}, {"id": "E1-09", "title": "Таблица: виртуализация/фикс колонки/сорт/ресайз/настройки/пагинация", "stage": "A", "track": "Design", "deps": "E1-05, E1-08", "size": "L", "hours": 140, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Design. Зависимости: E1-05, E1-08.", "agent": "v0.dev"}, {"id": "E1-10", "title": "Фильтры: панели/чипы/пресеты, мобайл-поведение", "stage": "A", "track": "Design", "deps": "E1-08", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Design. Зависимости: E1-08.", "agent": "v0.dev"}, {"id": "E1-11", "title": "Паттерны данных: empty/loading/error/нет доступа/нет сети, прогресс", "stage": "A", "track": "Design", "deps": "E1-08", "size": "M", "hours": 48, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Design. Зависимости: E1-08.", "agent": "v0.dev"}, {"id": "E1-12", "title": "Motion правила + prefers-reduced-motion", "stage": "A", "track": "Design", "deps": "E1-11", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Design. Зависимости: E1-11.", "agent": "v0.dev"}, {"id": "E1-13", "title": "Экраны и потоки R1 (auth, каталог, поиск, карточка, корзина, ЛК ЮЛ, BOM, системные состояния)", "stage": "A", "track": "Design", "deps": "E1-08, E1-11", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Design. Зависимости: E1-08, E1-11.", "agent": "v0.dev"}, {"id": "E1-14", "title": "Экраны этапа 2 (сравнение/списки/центр статусов/пресеты/возвраты)", "stage": "R1.1", "track": "Design", "deps": "E1-13", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Design. Зависимости: E1-13.", "agent": "v0.dev"}, {"id": "E1-15", "title": "Handoff пакет: спецификация поведения, токены, критерии UI приемки", "stage": "A", "track": "Design", "deps": "E1-13", "size": "M", "hours": 48, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Design. Зависимости: E1-13.", "agent": "v0.dev"}, {"id": "E2-01", "title": "Глобальные элементы: header/поиск/профиль/корзина + breadcrumbs", "stage": "R1", "track": "Frontend", "deps": "E0-11, E1-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E0-11, E1-13.", "agent": "Cursor"}, {"id": "E2-02", "title": "Главная: управляемые блоки из админки", "stage": "R1", "track": "Frontend", "deps": "E4-03, E0-11", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E4-03, E0-11.", "agent": "Cursor"}, {"id": "E2-03", "title": "Каталог: дерево категорий, листинг (плитка/таблица закупки)", "stage": "R1", "track": "Frontend", "deps": "E0-09, E1-13", "size": "L", "hours": 140, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Frontend. Зависимости: E0-09, E1-13.", "agent": "Cursor"}, {"id": "E2-04", "title": "Массовые действия в каталоге (add-many/qty/экспорт списка)", "stage": "R1", "track": "Frontend", "deps": "E2-03", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E2-03.", "agent": "Cursor"}, {"id": "E2-05", "title": "Правила видимости цен/условий по типу пользователя/роли", "stage": "R1", "track": "Backend", "deps": "E3-06, E4-07", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Backend. Зависимости: E3-06, E4-07.", "agent": "Claude"}, {"id": "E2-06", "title": "Фильтры (типы) и применение", "stage": "R1", "track": "Frontend", "deps": "E2-03, E1-10", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Frontend. Зависимости: E2-03, E1-10.", "agent": "Cursor"}, {"id": "E2-07", "title": "Сортировки (релевантность/цена/наличие/срок/популярность)", "stage": "R1", "track": "Frontend", "deps": "E2-03", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Frontend. Зависимости: E2-03.", "agent": "Cursor"}, {"id": "E2-08", "title": "Поиск ES: базовый контур + выдача", "stage": "R1", "track": "Search", "deps": "E7-01", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Search. Зависимости: E7-01.", "agent": "Claude"}, {"id": "E2-09", "title": "Поиск: опечатки/исправления", "stage": "R1.1", "track": "Search", "deps": "E2-08, E7-02", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Search. Зависимости: E2-08, E7-02.", "agent": "Claude"}, {"id": "E2-10", "title": "Поиск: синонимы/словари", "stage": "R1", "track": "Search", "deps": "E2-08", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Search. Зависимости: E2-08.", "agent": "Claude"}, {"id": "E2-11", "title": "Поиск: multi-SKU вставка списка артикулов", "stage": "R1.1", "track": "Search", "deps": "E2-08", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Search. Зависимости: E2-08.", "agent": "Claude"}, {"id": "E2-12", "title": "Поиск: умная выдача (товары + документы/категории)", "stage": "R1.1", "track": "Search", "deps": "E2-08, E2-15", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Search. Зависимости: E2-08, E2-15.", "agent": "Claude"}, {"id": "E2-13", "title": "Карточка товара: блок покупки (цена/наличие/срок/qty/добавить)", "stage": "R1", "track": "Frontend", "deps": "E2-03, E2-05", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Frontend. Зависимости: E2-03, E2-05.", "agent": "Cursor"}, {"id": "E2-14", "title": "Карточка: структурные характеристики + единицы", "stage": "R1", "track": "Frontend", "deps": "E2-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E2-13.", "agent": "Cursor"}, {"id": "E2-15", "title": "Карточка: документы товара (datasheet/сертификаты/инструкции)", "stage": "R1", "track": "Backend", "deps": "E0-09", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Backend. Зависимости: E0-09.", "agent": "Claude"}, {"id": "E2-16", "title": "Карточка: аналоги/замены (базово)", "stage": "R1.1", "track": "Backend", "deps": "E2-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Backend. Зависимости: E2-13.", "agent": "Claude"}, {"id": "E2-17", "title": "Производители: страница бренда (описание/подборки/SEO)", "stage": "R1.1", "track": "Frontend", "deps": "E2-03, E4-02", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E2-03, E4-02.", "agent": "Cursor"}, {"id": "E2-18", "title": "Производители: синонимы бренда", "stage": "R1.1", "track": "Search", "deps": "E2-10, E4-06", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Search. Зависимости: E2-10, E4-06.", "agent": "Claude"}, {"id": "E2-19", "title": "Акции/скидки: промо-страницы и условия", "stage": "R2", "track": "Backend", "deps": "E4-03, E4-07", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Backend. Зависимости: E4-03, E4-07.", "agent": "Claude"}, {"id": "E2-20", "title": "Избранное", "stage": "R2", "track": "Frontend", "deps": "E3-01", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Frontend. Зависимости: E3-01.", "agent": "Cursor"}, {"id": "E2-21", "title": "Списки закупок", "stage": "R1.1", "track": "Frontend", "deps": "E3-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E3-01.", "agent": "Cursor"}, {"id": "E2-22", "title": "Сравнение", "stage": "R2", "track": "Frontend", "deps": "E2-14", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E2-14.", "agent": "Cursor"}, {"id": "E2-23", "title": "Корзина: массовые операции и быстрый пересчет", "stage": "R1", "track": "Frontend", "deps": "E2-13", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Frontend. Зависимости: E2-13.", "agent": "Cursor"}, {"id": "E2-24", "title": "Оформление заказа/заявки (доставка/получатель/комментарии, B2B выбор орг)", "stage": "R1", "track": "Frontend", "deps": "E2-23, E3-05", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Frontend. Зависимости: E2-23, E3-05.", "agent": "Cursor"}, {"id": "E2-25", "title": "Сохранение контекста: гость (local), авториз (профиль)", "stage": "R1", "track": "Frontend", "deps": "E3-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E3-01.", "agent": "Cursor"}, {"id": "E2-26", "title": "Скорость витрины: SSR, скелетоны, lazy, кеширование", "stage": "R1", "track": "NFR", "deps": "E0-11, E0-13", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: NFR. Зависимости: E0-11, E0-13.", "agent": "Claude"}, {"id": "E3-01", "title": "Auth: вход/восстановление/смена пароля (ФЛ/ЮЛ)", "stage": "R1", "track": "Backend", "deps": "E0-11", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Backend. Зависимости: E0-11.", "agent": "Claude"}, {"id": "E3-02", "title": "Регистрация ЮЛ с модерацией и назначением условий", "stage": "R1", "track": "Backend", "deps": "E3-01", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Backend. Зависимости: E3-01.", "agent": "Claude"}, {"id": "E3-03", "title": "2FA для критичных ролей/операций", "stage": "R1.1", "track": "Security", "deps": "E3-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Security. Зависимости: E3-01.", "agent": "Claude"}, {"id": "E3-04", "title": "ЛК ФЛ: профиль/заказы/документы/обращения", "stage": "R2", "track": "Frontend", "deps": "E3-01, E3-09", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E3-01, E3-09.", "agent": "Cursor"}, {"id": "E3-05", "title": "ЛК ЮЛ: организация/реквизиты/сотрудники", "stage": "R1", "track": "Frontend", "deps": "E3-02", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E3-02.", "agent": "Cursor"}, {"id": "E3-06", "title": "RBAC ЮЛ (облегчённый в R1, полный в R1.1)", "stage": "R1", "track": "Security", "deps": "E3-05", "size": "L", "hours": 140, "notes": "В R1 — минимально для цен/доков; в R1.1 — полная матрица", "col": "backlog", "priority": "high", "desc": "Трек: Security. Зависимости: E3-05. В R1 — минимально для цен/доков; в R1.1 — полная матрица", "agent": "Claude"}, {"id": "E3-07", "title": "Лимиты/согласования/подтверждения критических действий", "stage": "R1.1", "track": "Security", "deps": "E3-06", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Security. Зависимости: E3-06.", "agent": "Claude"}, {"id": "E3-08", "title": "Управление сессиями (завершение, политики)", "stage": "R1.1", "track": "Security", "deps": "E3-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Security. Зависимости: E3-01.", "agent": "Claude"}, {"id": "E3-09", "title": "Заказы в ЛК: статусы + журнал событий", "stage": "R1", "track": "Backend", "deps": "E2-24", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Backend. Зависимости: E2-24.", "agent": "Claude"}, {"id": "E3-10", "title": "Документы: архив + массовая выгрузка", "stage": "R1", "track": "Backend", "deps": "E3-09, E2-15", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Backend. Зависимости: E3-09, E2-15.", "agent": "Claude"}, {"id": "E3-11", "title": "Частичные отгрузки: документы по партиям", "stage": "R2", "track": "Backend", "deps": "E3-10, E5-17", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Backend. Зависимости: E3-10, E5-17.", "agent": "Claude"}, {"id": "E3-12", "title": "ЭДО через EDI: статусы и документы end-to-end", "stage": "R2", "track": "Integrations", "deps": "E5-04", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Integrations. Зависимости: E5-04.", "agent": "Claude"}, {"id": "E3-13", "title": "Поиск в ЛК по заказам и документам", "stage": "R1.1", "track": "Search", "deps": "E3-09, E3-10", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Search. Зависимости: E3-09, E3-10.", "agent": "Claude"}, {"id": "E4-01", "title": "Админка контента: статьи/база знаний", "stage": "R1", "track": "Admin/CMS", "deps": "E0-11", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Admin/CMS. Зависимости: E0-11.", "agent": "Cursor"}, {"id": "E4-02", "title": "SEO-посадочные: шаблоны/метаданные/правила индексации", "stage": "R1.1", "track": "SEO", "deps": "E4-01", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: SEO. Зависимости: E4-01.", "agent": "Cursor"}, {"id": "E4-03", "title": "Управление блоками главной/промо", "stage": "R1", "track": "Admin/CMS", "deps": "E4-01", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Admin/CMS. Зависимости: E4-01.", "agent": "Cursor"}, {"id": "E4-04", "title": "Админка каталога: категории/атрибуты фильтров/единицы", "stage": "R1", "track": "Admin/Catalog", "deps": "E2-03", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Admin/Catalog. Зависимости: E2-03.", "agent": "Cursor"}, {"id": "E4-05", "title": "Админка карточек: характеристики/доки/медиа/аналоги/совместимость", "stage": "R1.1", "track": "Admin/Catalog", "deps": "E2-13", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Admin/Catalog. Зависимости: E2-13.", "agent": "Cursor"}, {"id": "E4-06", "title": "Админка брендов + синонимы", "stage": "R1", "track": "Admin/Catalog", "deps": "E4-04", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Admin/Catalog. Зависимости: E4-04.", "agent": "Cursor"}, {"id": "E4-07", "title": "Сегментация цен: правила по типу пользователя/организации", "stage": "R1", "track": "Pricing", "deps": "E3-06", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Pricing. Зависимости: E3-06.", "agent": "Claude"}, {"id": "E4-08", "title": "Источник цены + свежесть данных (timestamp/TTL)", "stage": "R1", "track": "Pricing", "deps": "E5-03", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Pricing. Зависимости: E5-03.", "agent": "Claude"}, {"id": "E4-09", "title": "Правило деградации: цена устарела → заявка", "stage": "R1.1", "track": "Pricing", "deps": "E4-08", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Pricing. Зависимости: E4-08.", "agent": "Claude"}, {"id": "E4-10", "title": "SEO-структура: SSR, чистые URL, sitemap/robots, canonical, фильтры", "stage": "R1", "track": "SEO", "deps": "E2-26", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: SEO. Зависимости: E2-26.", "agent": "Cursor"}, {"id": "E5-01", "title": "Подключение источников (поставщики/ERP) по API (цены/остатки/сроки/частично доки)", "stage": "R2", "track": "Integrations", "deps": "E0-06", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Integrations. Зависимости: E0-06.", "agent": "Claude"}, {"id": "E5-02", "title": "Пакетный импорт Excel/CSV как резервный канал + отчеты ошибок", "stage": "R1", "track": "Integrations", "deps": "E0-06", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Integrations. Зависимости: E0-06.", "agent": "Claude"}, {"id": "E5-03", "title": "Обновления по расписанию (цены/остатки/сроки)", "stage": "R1", "track": "Integrations", "deps": "E5-02", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E5-02.", "agent": "Claude"}, {"id": "E5-04", "title": "EDI: обмен статусами и документами + подтверждения", "stage": "R2", "track": "EDI/EDO", "deps": "E0-07", "size": "XL+", "hours": 400, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: EDI/EDO. Зависимости: E0-07.", "agent": "Cursor"}, {"id": "E5-05", "title": "Webhooks: уведомления внешних систем о статусах/отгрузках", "stage": "R2", "track": "API", "deps": "E3-09", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: API. Зависимости: E3-09.", "agent": "Claude"}, {"id": "E5-06", "title": "Внешний API для клиентов (каталог/заказы/статусы/доки)", "stage": "R2", "track": "API", "deps": "E0-07", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: API. Зависимости: E0-07.", "agent": "Claude"}, {"id": "E5-07", "title": "Журнал обмена (что/когда/сколько обновили)", "stage": "R1", "track": "Integrations", "deps": "E5-02", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E5-02.", "agent": "Claude"}, {"id": "E5-08", "title": "Ретраи с backoff и лимитами", "stage": "R1", "track": "Integrations", "deps": "E5-03", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E5-03.", "agent": "Claude"}, {"id": "E5-09", "title": "Деградации интеграций (ограничения, объяснения, переход в заявку)", "stage": "R1.1", "track": "Integrations", "deps": "E4-08", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E4-08.", "agent": "Claude"}, {"id": "E5-10", "title": "Внутренняя обработка заказа: назначение менеджера, SLA, статусы", "stage": "R2", "track": "Ops/CRM", "deps": "E3-09", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Ops/CRM. Зависимости: E3-09.", "agent": "Claude"}, {"id": "E5-11", "title": "CRM-маршрутизация по правилам", "stage": "R2", "track": "Ops/CRM", "deps": "E5-10", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Ops/CRM. Зависимости: E5-10.", "agent": "Claude"}, {"id": "E5-12", "title": "Уведомления менеджеру (email/мессенджер/задача)", "stage": "R2", "track": "Ops/CRM", "deps": "E5-10", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Ops/CRM. Зависимости: E5-10.", "agent": "Claude"}, {"id": "E5-13", "title": "Коммуникации клиент↔менеджер внутри кабинета", "stage": "R2", "track": "Ops/CRM", "deps": "E5-10", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Ops/CRM. Зависимости: E5-10.", "agent": "Claude"}, {"id": "E5-14", "title": "Выставление счета и публикация в ЛК", "stage": "R2", "track": "Ops/CRM", "deps": "E5-10, E3-10", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Ops/CRM. Зависимости: E5-10, E3-10.", "agent": "Claude"}, {"id": "E5-15", "title": "Склад: резервирование остатков", "stage": "R2", "track": "Warehouse", "deps": "E5-03", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Warehouse. Зависимости: E5-03.", "agent": "Cursor"}, {"id": "E5-16", "title": "Склад: комплектация/упаковка", "stage": "R2", "track": "Warehouse", "deps": "E5-15", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Warehouse. Зависимости: E5-15.", "agent": "Cursor"}, {"id": "E5-17", "title": "Склад: отгрузка + печать документов + привязка к партии", "stage": "R2", "track": "Warehouse", "deps": "E5-16, E3-10", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Warehouse. Зависимости: E5-16, E3-10.", "agent": "Cursor"}, {"id": "E5-18", "title": "Склад: частичные отгрузки", "stage": "R2", "track": "Warehouse", "deps": "E5-17", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Warehouse. Зависимости: E5-17.", "agent": "Cursor"}, {"id": "E5-19", "title": "Склад: инвентаризация и корректировки", "stage": "R2", "track": "Warehouse", "deps": "E5-15", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Warehouse. Зависимости: E5-15.", "agent": "Cursor"}, {"id": "E5-20", "title": "Центр статусов интеграций/инцидентов (UX+админ)", "stage": "R1.1", "track": "Integrations", "deps": "E5-07, E5-08, E5-09, E0-13", "size": "M", "hours": 90, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E5-07, E5-08, E5-09, E0-13.", "agent": "Claude"}, {"id": "E6-01", "title": "BOM: список спецификаций + импорт Excel/CSV/PDF", "stage": "R2", "track": "BOM", "deps": "E3-01", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: BOM. Зависимости: E3-01.", "agent": "Claude"}, {"id": "E6-02", "title": "BOM: матчинг строк со справочником", "stage": "R2", "track": "BOM", "deps": "E6-01, E7-01", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: BOM. Зависимости: E6-01, E7-01.", "agent": "Claude"}, {"id": "E6-03", "title": "BOM: валидации (единицы/дубли/параметры)", "stage": "R2", "track": "BOM", "deps": "E6-02", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: BOM. Зависимости: E6-02.", "agent": "Claude"}, {"id": "E6-04", "title": "BOM: аналоги/замены при дефиците", "stage": "R2", "track": "BOM", "deps": "E6-02, E2-16", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: BOM. Зависимости: E6-02, E2-16.", "agent": "Claude"}, {"id": "E6-05", "title": "BOM: экспорт КП/выгрузки", "stage": "R2", "track": "BOM", "deps": "E6-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: BOM. Зависимости: E6-01.", "agent": "Claude"}, {"id": "E6-06", "title": "Совместимость: правила несовместимости", "stage": "R2", "track": "Compatibility", "deps": "E4-05", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Compatibility. Зависимости: E4-05.", "agent": "Codex"}, {"id": "E6-07", "title": "Совместимость: проверка в корзине и BOM", "stage": "R2", "track": "Compatibility", "deps": "E6-06, E2-23, E6-01", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Compatibility. Зависимости: E6-06, E2-23, E6-01.", "agent": "Codex"}, {"id": "E6-08", "title": "Совместимость: рекомендации аксессуаров/компонентов", "stage": "R2", "track": "Compatibility", "deps": "E6-07", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Compatibility. Зависимости: E6-07.", "agent": "Codex"}, {"id": "E6-09", "title": "LLM: чат-консультации в карточке товара (только советы)", "stage": "R1", "track": "LLM", "deps": "E6-25, E6-27, E6-28, E6-29, E2-13, E2-15", "size": "M", "hours": 50, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: LLM. Зависимости: E6-25, E6-27, E6-28, E6-29, E2-13, E2-15.", "agent": "Claude"}, {"id": "E6-10", "title": "LLM: подбор по задаче (не в MVP)", "stage": "R2+", "track": "LLM", "deps": "E6-25, E2-08", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: LLM. Зависимости: E6-25, E2-08.", "agent": "Claude"}, {"id": "E6-11", "title": "LLM: команды по корзине/заказам (строго RBAC)", "stage": "R3+", "track": "LLM", "deps": "E6-26, E3-06, E7-10", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: LLM. Зависимости: E6-26, E3-06, E7-10.", "agent": "Claude"}, {"id": "E6-12", "title": "LLM: эскалация менеджеру/поддержке", "stage": "R2+", "track": "LLM", "deps": "E5-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: LLM. Зависимости: E5-13.", "agent": "Claude"}, {"id": "E6-13", "title": "Лояльность: витрина бонусов", "stage": "R3+", "track": "Loyalty", "deps": "E3-01", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Loyalty. Зависимости: E3-01.", "agent": "Cursor"}, {"id": "E6-14", "title": "Лояльность: применение бонусов на оформлении", "stage": "R3+", "track": "Loyalty", "deps": "E6-13, E2-24", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Loyalty. Зависимости: E6-13, E2-24.", "agent": "Cursor"}, {"id": "E6-15", "title": "Лояльность: ограничения (после оплаты, отмена при возврате)", "stage": "R3+", "track": "Loyalty", "deps": "E6-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Loyalty. Зависимости: E6-13.", "agent": "Cursor"}, {"id": "E6-16", "title": "Внутренний маркет: миссии/награды", "stage": "R3+", "track": "Marketing", "deps": "E6-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Marketing. Зависимости: E6-13.", "agent": "Cursor"}, {"id": "E6-17", "title": "Внутренний маркет: персональные предложения", "stage": "R4+", "track": "Marketing", "deps": "E6-16", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Marketing. Зависимости: E6-16.", "agent": "Cursor"}, {"id": "E6-18", "title": "Email-уведомления клиенту (статусы/доки/сервис)", "stage": "R1", "track": "Notifications", "deps": "E3-09", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Notifications. Зависимости: E3-09.", "agent": "Codex"}, {"id": "E6-19", "title": "SMS/мессенджеры (опционально)", "stage": "R2+", "track": "Notifications", "deps": "E6-18", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Notifications. Зависимости: E6-18.", "agent": "Codex"}, {"id": "E6-20", "title": "Управление согласиями и типами уведомлений", "stage": "R1.1", "track": "Notifications", "deps": "E6-18", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Notifications. Зависимости: E6-18.", "agent": "Codex"}, {"id": "E6-21", "title": "Новости/статический контент (справка/контакты)", "stage": "R1", "track": "Content", "deps": "E4-01", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Content. Зависимости: E4-01.", "agent": "Cursor"}, {"id": "E6-22", "title": "Адаптивность ключевых сценариев", "stage": "R1", "track": "Frontend", "deps": "E1-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E1-13.", "agent": "Cursor"}, {"id": "E6-23", "title": "PWA: установка + кеширование", "stage": "R2+", "track": "PWA", "deps": "E0-11", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: PWA. Зависимости: E0-11.", "agent": "Cursor"}, {"id": "E6-24", "title": "PWA: push уведомления", "stage": "R3+", "track": "PWA", "deps": "E6-20", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: PWA. Зависимости: E6-20.", "agent": "Cursor"}, {"id": "E6-25", "title": "[LLM] Источники знаний + RAG-контур (под карточку)", "stage": "R1", "track": "LLM", "deps": "E2-15, E7-01, E0-11", "size": "L", "hours": 140, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: LLM. Зависимости: E2-15, E7-01, E0-11.", "agent": "Claude"}, {"id": "E6-26", "title": "[LLM] Политики безопасности/ограничений (RBAC allowlist, подтверждения)", "stage": "R1.1", "track": "LLM", "deps": "E3-06, E7-10, E7-13", "size": "M", "hours": 120, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: LLM. Зависимости: E3-06, E7-10, E7-13.", "agent": "Claude"}, {"id": "E6-27", "title": "[LLM] Rate limit/квоты/контроль стоимости + кеш/таймауты", "stage": "R1", "track": "LLM", "deps": "E7-12, E0-13", "size": "M", "hours": 50, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: LLM. Зависимости: E7-12, E0-13.", "agent": "Claude"}, {"id": "E6-28", "title": "[LLM] Fallback/деградация при недоступности LLM", "stage": "R1", "track": "LLM", "deps": "E6-09", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: LLM. Зависимости: E6-09.", "agent": "Claude"}, {"id": "E6-29", "title": "[LLM] Телеметрия эффективности (помог/не помог, причины)", "stage": "R1", "track": "LLM", "deps": "E0-03, E0-13", "size": "M", "hours": 50, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: LLM. Зависимости: E0-03, E0-13.", "agent": "Claude"}, {"id": "E6-30", "title": "Файлы BOM: проверка типа/размера + AV-скан + безопасное хранение", "stage": "R2", "track": "Security", "deps": "E6-01, E0-11", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Security. Зависимости: E6-01, E0-11.", "agent": "Claude"}, {"id": "E7-01", "title": "Индексация ES: полная + инкрементальная", "stage": "R1", "track": "Search", "deps": "E0-08, E0-09", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Search. Зависимости: E0-08, E0-09.", "agent": "Claude"}, {"id": "E7-02", "title": "Управление словарями (синонимы/термины)", "stage": "R1.1", "track": "Search", "deps": "E7-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Search. Зависимости: E7-01.", "agent": "Claude"}, {"id": "E7-03", "title": "Redis-кеш подсказок/частых запросов", "stage": "R1.1", "track": "NFR", "deps": "E2-08", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: NFR. Зависимости: E2-08.", "agent": "Claude"}, {"id": "E7-04", "title": "Контроль качества выдачи (ключевые запросы, отчёт пустых)", "stage": "R1.1", "track": "Search", "deps": "E2-08", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Search. Зависимости: E2-08.", "agent": "Claude"}, {"id": "E7-05", "title": "Метрики p95/error_rate, нагрузка, очереди", "stage": "A", "track": "Observability", "deps": "E0-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Observability. Зависимости: E0-13.", "agent": "Cursor"}, {"id": "E7-06", "title": "Логи с request_id, корреляция", "stage": "A", "track": "Observability", "deps": "E0-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Observability. Зависимости: E0-13.", "agent": "Cursor"}, {"id": "E7-07", "title": "Трассировка (tracing)", "stage": "R2", "track": "Observability", "deps": "E0-13", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Observability. Зависимости: E0-13.", "agent": "Cursor"}, {"id": "E7-08", "title": "Алерты: NFR, сбои интеграций, очереди", "stage": "R1", "track": "Observability", "deps": "E7-05", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Observability. Зависимости: E7-05.", "agent": "Cursor"}, {"id": "E7-09", "title": "Аудит критичных изменений (права/цены/статусы/доки)", "stage": "R1.1", "track": "Security", "deps": "E3-06, E4-07", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Security. Зависимости: E3-06, E4-07.", "agent": "Claude"}, {"id": "E7-10", "title": "RBAC enforcement на заказы/доки/финансы", "stage": "R1", "track": "Security", "deps": "E3-06", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Security. Зависимости: E3-06.", "agent": "Claude"}, {"id": "E7-11", "title": "2FA enforcement на критичные операции", "stage": "R1.1", "track": "Security", "deps": "E3-03", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Security. Зависимости: E3-03.", "agent": "Claude"}, {"id": "E7-12", "title": "Rate limiting на API/витрину", "stage": "R1", "track": "Security", "deps": "E0-11", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Security. Зависимости: E0-11.", "agent": "Claude"}, {"id": "E7-13", "title": "OWASP базовые практики (валидации, XSS/CSRF, ревью)", "stage": "R1", "track": "Security", "deps": "E0-10", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Security. Зависимости: E0-10.", "agent": "Claude"}, {"id": "E7-14", "title": "Secrets management + ротация", "stage": "A", "track": "Security", "deps": "E0-12", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Security. Зависимости: E0-12.", "agent": "Claude"}, {"id": "E7-15", "title": "Масштабирование ES до 5 млн SKU (шарды/ресурсы)", "stage": "R2", "track": "NFR", "deps": "E7-01", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: NFR. Зависимости: E7-01.", "agent": "Claude"}, {"id": "E7-16", "title": "Горизонтальное масштабирование backend", "stage": "R2", "track": "NFR", "deps": "E0-11", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: NFR. Зависимости: E0-11.", "agent": "Claude"}, {"id": "E7-17", "title": "Очереди задач для тяжёлых операций", "stage": "R2", "track": "NFR", "deps": "E0-08", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: NFR. Зависимости: E0-08.", "agent": "Claude"}, {"id": "E7-18", "title": "Миграции БД с откатом (практика и тест)", "stage": "R1", "track": "DevOps", "deps": "E0-12", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: DevOps. Зависимости: E0-12.", "agent": "Cursor"}, {"id": "E7-19", "title": "Бэкапы + тест восстановления", "stage": "A", "track": "DevOps", "deps": "E0-12", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: DevOps. Зависимости: E0-12.", "agent": "Cursor"}, {"id": "E7-20", "title": "DR-план (аварийное восстановление)", "stage": "R2", "track": "DevOps", "deps": "E7-19", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: DevOps. Зависимости: E7-19.", "agent": "Cursor"}, {"id": "E7-21", "title": "Чек-лист принципиальных запретов (quality gate)", "stage": "A", "track": "QA", "deps": "E0-14", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: QA. Зависимости: E0-14.", "agent": "Codex"}];
+// ════════════════════════════════════════════
+// STATE
+// ════════════════════════════════════════════
+function getTasksKey(projId){ return 'tasks_'+(projId||'mossb'); }
+function loadTasksForProject(projId){
+  try{
+    const s=localStorage.getItem(getTasksKey(projId));
+    if(s) return JSON.parse(s);
+  }catch(e){}
+  // Default project gets the built-in tasks; new projects start empty
+  return projId==='mossb' ? DEFAULT_TASKS.map(t=>({...t})) : [];
+}
+function loadTasks(){ return loadTasksForProject(loadActiveProject()); }
+function save(){ try{localStorage.setItem(getTasksKey(activeProjId),JSON.stringify(tasks));}catch(e){} }
+
+let tasks=loadTasks(),curStage='all',searchQ='',activeId=null,chatHist=[],ntHist=[],pendingTask=null,newTaskCol='backlog';
+
+// ════════════════════════════════════════════
+// THEME
+// ════════════════════════════════════════════
+let theme=localStorage.getItem('mossb_theme')||'dark';
+function applyTheme(){document.documentElement.setAttribute('data-theme',theme);document.getElementById('theme-btn').textContent=theme==='dark'?'☀️':'🌙';updateStageTabs();}
+function toggleTheme(){theme=theme==='dark'?'light':'dark';localStorage.setItem('mossb_theme',theme);applyTheme();}
+applyTheme();
+
+// ════════════════════════════════════════════
+// TIMER
+// ════════════════════════════════════════════
+let timerRunning=false,delayRunning=false;
+let projMs=parseInt(localStorage.getItem('mossb_proj_ms'))||0;
+let delMs=parseInt(localStorage.getItem('mossb_del_ms'))||0;
+// timerMode: 'stopped' | 'project' | 'delay'
+let timerMode=localStorage.getItem('mossb_timer_mode')||'stopped';
+// wallStart: epoch ms when current running period began (to calc elapsed since last save)
+let timerWall=parseInt(localStorage.getItem('mossb_timer_wall'))||0;
+let projStart=null,delStart=null,timerInt=null;
+
+function saveTimerState(){
+  localStorage.setItem('mossb_timer_mode', timerMode);
+  localStorage.setItem('mossb_timer_wall', timerMode==='stopped'?0:Date.now());
+  localStorage.setItem('mossb_proj_ms', projMs);
+  localStorage.setItem('mossb_del_ms', delMs);
+}
+
+function applyTimerUI(){
+  const btn=document.getElementById('btn-timer');
+  const dc=document.getElementById('delay-chip');
+  if(timerMode==='project'){
+    btn.textContent='⏸ Стоп';btn.classList.add('running');
+    dc.classList.add('hidden');
+  } else if(timerMode==='delay'){
+    btn.textContent='▶ Старт';btn.classList.remove('running');
+    dc.classList.remove('hidden');
+  } else {
+    btn.textContent='▶ Старт';btn.classList.remove('running');
+    dc.classList.add('hidden');
+  }
+}
+
+function toggleTimer(){
+  const dc=document.getElementById('delay-chip');
+  if(timerMode==='stopped'){
+    // Start project timer
+    timerMode='project';
+    timerRunning=true;delayRunning=false;
+    projStart=Date.now()-projMs;
+    timerInt=setInterval(tickTimer,1000);
+  } else if(timerMode==='project'){
+    // Stop project → start delay
+    timerRunning=false;
+    projMs=Date.now()-projStart;
+    clearInterval(timerInt);
+    timerMode='delay';
+    delayRunning=true;
+    delStart=Date.now()-delMs;
+    timerInt=setInterval(tickTimer,1000);
+  } else {
+    // Stop delay → resume project
+    delayRunning=false;
+    delMs=Date.now()-delStart;
+    clearInterval(timerInt);
+    timerMode='project';
+    timerRunning=true;
+    projStart=Date.now()-projMs;
+    timerInt=setInterval(tickTimer,1000);
+  }
+  saveTimerState();
+  applyTimerUI();
+}
+
+function tickTimer(){
+  if(timerRunning){projMs=Date.now()-projStart;localStorage.setItem('mossb_proj_ms',projMs);paintProj(projMs);}
+  if(delayRunning){delMs=Date.now()-delStart;localStorage.setItem('mossb_del_ms',delMs);paintDel(delMs);}
+}
+
+function paintProj(ms){
+  const sec=Math.floor(ms/1000);
+  const h=Math.floor(sec/3600)%24,m=Math.floor(sec/60)%60;
+  const totalDays=Math.floor(sec/86400);
+  const weeks=Math.floor(totalDays/7);
+  const dayOfWeek=totalDays%7;
+  const wEl=document.getElementById('t-weeks');
+  wEl.textContent=weeks;
+  const pct=weeks/50;
+  wEl.className='tc-val'+(pct>0.85?' danger':pct>0.65?' warn':'');
+  document.getElementById('t-days').textContent=dayOfWeek;
+  document.getElementById('t-time').textContent=pad(h)+':'+pad(m);
+}
+function paintDel(ms){
+  const sec=Math.floor(ms/1000);
+  const h=Math.floor(sec/3600)%24,m=Math.floor(sec/60)%60;
+  const totalDays=Math.floor(sec/86400);
+  const weeks=Math.floor(totalDays/7);
+  const dayOfWeek=totalDays%7;
+  document.getElementById('d-weeks').textContent=weeks;
+  document.getElementById('d-days').textContent=dayOfWeek;
+  document.getElementById('d-time').textContent=pad(h)+':'+pad(m);
+}
+function pad(n){return String(n).padStart(2,'0');}
+
+// restore on load — account for real time elapsed since page was closed
+if(timerMode==='project' && timerWall>0){
+  // Page was closed while project timer running — add elapsed time since last save
+  const elapsed = Date.now() - timerWall;
+  projMs += elapsed;
+  localStorage.setItem('mossb_proj_ms', projMs);
+} else if(timerMode==='delay' && timerWall>0){
+  // Page was closed while delay timer running — add elapsed time
+  const elapsed = Date.now() - timerWall;
+  delMs += elapsed;
+  localStorage.setItem('mossb_del_ms', delMs);
+}
+
+if(projMs>0) paintProj(projMs);
+if(delMs>0) paintDel(delMs);
+
+// Restart interval if timer was running
+if(timerMode==='project'){
+  timerRunning=true;
+  projStart=Date.now()-projMs;
+  timerInt=setInterval(tickTimer,1000);
+} else if(timerMode==='delay'){
+  delayRunning=true;
+  delStart=Date.now()-delMs;
+  timerInt=setInterval(tickTimer,1000);
+  document.getElementById('delay-chip').classList.remove('hidden');
+}
+// Set button state after DOM ready
+setTimeout(applyTimerUI, 0);
+
+// ════════════════════════════════════════════
+// SEARCH
+// ════════════════════════════════════════════
+function onSearch(q){searchQ=q.toLowerCase().trim();render();}
+
+
+// ════════════════════════════════════════════
+// DYNAMIC STAGE TABS
+// ════════════════════════════════════════════
+const STAGE_LABELS = {'A':'Этап A','R1':'R1 MVP','R1.1':'R1.1 B2B','R2':'R2 Full','R2+':'R2+','R3+':'R3+','R4+':'R4+','F':'Launch'};
+
+function renderStageTabs(){
+  const bar = document.getElementById('stage-bar');
+  // Remove existing stab buttons (not the search wrap)
+  bar.querySelectorAll('.stab').forEach(el=>el.remove());
+
+  // Build "Все" button
+  const allBtn = document.createElement('button');
+  allBtn.className = 'stab' + (curStage==='all'?' active':'');
+  allBtn.dataset.stage = 'all';
+  allBtn.onclick = ()=>setStage('all', allBtn);
+  allBtn.innerHTML = 'Все <span class="cnt">' + tasks.length + '</span>';
+  bar.insertBefore(allBtn, bar.querySelector('.stab-search-wrap'));
+
+  // If no tasks, only show "Все"
+  if(!tasks.length){ updateStageTabs(); return; }
+
+  // Collect unique stages present in this project's tasks (in defined order)
+  const STAGE_ORDER = ['A','R1','R1.1','R2','R2+','R3+','R4+','F'];
+  const presentStages = STAGE_ORDER.filter(s => tasks.some(t=>t.stage===s));
+
+  // Group: R2+R2+ together, R3++R4+ together
+  const groups = [
+    {key:'R2',  stages:['R2','R2+'],  label:'R2 Full'},
+    {key:'R3+', stages:['R3+','R4+'], label:'R3+'},
+  ];
+
+  const rendered = new Set();
+  presentStages.forEach(s=>{
+    if(rendered.has(s)) return;
+    const group = groups.find(g=>g.stages.includes(s));
+    if(group){
+      // Check if any stage in the group is present
+      const anyPresent = group.stages.some(gs=>tasks.some(t=>t.stage===gs));
+      if(!anyPresent) return;
+      const cnt = tasks.filter(t=>group.stages.includes(t.stage)).length;
+      const isActive = group.stages.includes(curStage) || curStage===group.key;
+      const btn = document.createElement('button');
+      btn.className = 'stab' + (isActive?' active':'');
+      btn.dataset.stage = group.key;
+      btn.onclick = ()=>setStage(group.key, btn);
+      btn.innerHTML = group.label + ' <span class="cnt">' + cnt + '</span>';
+      bar.insertBefore(btn, bar.querySelector('.stab-search-wrap'));
+      group.stages.forEach(gs=>rendered.add(gs));
+    } else {
+      const cnt = tasks.filter(t=>t.stage===s).length;
+      const isActive = curStage===s;
+      const btn = document.createElement('button');
+      btn.className = 'stab' + (isActive?' active':'');
+      btn.dataset.stage = s;
+      btn.onclick = ()=>setStage(s, btn);
+      btn.innerHTML = (STAGE_LABELS[s]||s) + ' <span class="cnt">' + cnt + '</span>';
+      bar.insertBefore(btn, bar.querySelector('.stab-search-wrap'));
+      rendered.add(s);
+    }
+  });
+
+  updateStageTabs();
+}
+
+// ════════════════════════════════════════════
+// HELPERS
+// ════════════════════════════════════════════
+function getFiltered(){
+  let ft;
+  if(curStage==='all')ft=tasks;
+  else if(curStage==='R2')ft=tasks.filter(t=>['R2','R2+'].includes(t.stage));
+  else if(curStage==='R3+')ft=tasks.filter(t=>['R3+','R4+'].includes(t.stage));
+  else ft=tasks.filter(t=>t.stage===curStage);
+  if(searchQ)ft=ft.filter(t=>t.title.toLowerCase().includes(searchQ)||t.id.toLowerCase().includes(searchQ)||(t.track||'').toLowerCase().includes(searchQ)||(t.agent||'').toLowerCase().includes(searchQ));
+  return ft;
+}
+function sc(s){return SC[s]||'#888';}
+function fmtBudget(n){if(n>=1000000)return(n/1000000).toFixed(3).replace(/\.?0+$/,'')+'M';if(n>=1000)return(n/1000).toFixed(0)+'K';return n+'';}
+
+// ════════════════════════════════════════════
+// STATS
+// ════════════════════════════════════════════
+function updateStats(){
+  const done=tasks.filter(t=>t.col==='done').length;
+  const wip=tasks.filter(t=>t.col==='inprogress').length;
+  const back=tasks.filter(t=>t.col!=='done'&&t.col!=='inprogress').length;
+  document.getElementById('tl-done').textContent=done;
+  document.getElementById('tl-wip').textContent=wip;
+  document.getElementById('tl-back').textContent=back;
+  document.getElementById('progress-fill').style.width=tasks.length?Math.round(done/tasks.length*100)+'%':'0%';
+  const stages=[...new Set(tasks.map(t=>t.stage))];
+  let earned=0;
+  stages.forEach(s=>{const st=tasks.filter(t=>t.stage===s);if(!st.length)return;earned+=Math.round((STAGE_BUDGETS[s]||0)*st.filter(t=>t.col==='done').length/st.length);});
+  document.getElementById('b-earned').textContent=fmtBudget(earned)+' ₽';
+  document.getElementById('b-bar').style.width=Math.round(earned/TOTAL_BUDGET*100)+'%';
+  // stage counts now handled by renderStageTabs()
+}
+
+// ════════════════════════════════════════════
+// STAGE TABS
+// ════════════════════════════════════════════
+function updateStageTabs(){
+  document.querySelectorAll('.stab').forEach(btn=>{
+    const s=btn.dataset.stage,isActive=s===curStage,color=STAB_C[s];
+    if(isActive){
+      if(color){btn.style.background=color;btn.style.borderColor=color;btn.style.color='#fff';}
+      else{btn.style.background='var(--gold)';btn.style.borderColor='var(--gold)';btn.style.color='#000';}
+    }else{btn.style.background='';btn.style.borderColor='';btn.style.color='';}
+  });
+}
+function setStage(s,btn){curStage=s;updateStageTabs();render();}
+
+// ════════════════════════════════════════════
+// RENDER
+// ════════════════════════════════════════════
+function render(){
+  const board=document.getElementById('board');
+  const ft=getFiltered();
+  board.innerHTML='';
+  COLS.forEach(col=>{
+    const ct=ft.filter(t=>t.col===col.id);
+    const colEl=document.createElement('div');
+    colEl.className='col';
+    colEl.dataset.col=col.id;
+
+    // Header
+    const head=document.createElement('div');head.className='col-head';
+    head.innerHTML=`<div class="col-label">${col.label}</div><div class="col-cnt" id="hcnt-${col.id}">${ct.length}</div>`;
+    colEl.appendChild(head);
+
+    // Body
+    const body=document.createElement('div');
+    body.className='col-body';body.id='col-'+col.id;
+    body.dataset.col=col.id;
+
+    if(ct.length===0){
+      const empty=document.createElement('div');empty.className='col-empty';empty.textContent='Нет задач';
+      body.appendChild(empty);
+    } else {
+      ct.forEach(t=>{
+        const card=makeCardEl(t);
+        body.appendChild(card);
+      });
+    }
+
+    // Drop zone events on body
+    body.addEventListener('dragover', onDragOver);
+    body.addEventListener('dragenter', onDragEnter);
+    body.addEventListener('dragleave', onDragLeave);
+    body.addEventListener('drop', onDrop);
+
+    colEl.appendChild(body);
+
+    // Footer
+    const foot=document.createElement('div');foot.className='col-footer';
+    foot.innerHTML=`<button class="col-add-btn" onclick="openNewTask('${col.id}')">＋ задача</button>`;
+    colEl.appendChild(foot);
+
+    board.appendChild(colEl);
+  });
+  updateStats();
+  renderStageTabs();
+}
+
+function makeCardEl(t){
+  const color=sc(t.stage),szClr=SZC[t.size||'M']||'#fbbf24',agClr=AGC[t.agent]||'#888';
+  const el=document.createElement('div');
+  el.className='card';
+  el.draggable=true;
+  el.dataset.id=t.id;
+  el.innerHTML=`
+    <div class="card-strip" style="background:${color}"></div>
+    <div class="card-r1">
+      <div class="card-id">${t.id}</div>
+      <div class="size-pill" style="background:${szClr}1a;color:${szClr};border:1px solid ${szClr}44">${t.size||'M'}</div>
+    </div>
+    <div class="card-title">${t.title}</div>
+    <div class="card-r3">
+      <div class="agent-pill" style="color:${agClr};border-color:${agClr}33;background:${agClr}12">${t.agent}</div>
+      <div class="track-lbl">${t.track||''}</div>
+      <div class="hours-lbl">${t.hours}h</div>
+    </div>`;
+  // Click to open (only if not dragging)
+  el.addEventListener('click', ()=>{ if(!isDragging) openTask(t.id); });
+  // Drag events
+  el.addEventListener('dragstart', onDragStart);
+  el.addEventListener('dragend',   onDragEnd);
+  return el;
+}
+// Keep renderCard as alias used nowhere else (safety)
+function renderCard(t){ return makeCardEl(t).outerHTML; }
+
+// ════════════════════════════════════════════
+// TASK VIEW MODAL
+// ════════════════════════════════════════════
+function openTask(id){
+  activeId=id;const t=tasks.find(x=>x.id===id);if(!t)return;
+  const color=sc(t.stage);
+  const badge=document.getElementById('tm-badge');
+  badge.textContent=t.stage;
+  badge.style.cssText=`background:${color}1a;color:${color};border:1px solid ${color}44;width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:Syne,sans-serif;font-size:10px;font-weight:800;letter-spacing:.5px;flex-shrink:0;margin-top:2px;`;
+  document.getElementById('tm-id').textContent=`${t.id} · ${t.track||''}`;
+  document.getElementById('tm-title').textContent=t.title;
+  document.getElementById('tm-desc').textContent=t.desc||'—';
+  const agClr=AGC[t.agent]||'#888';
+  document.getElementById('tm-meta').innerHTML=`
+    <div class="mc"><div class="mc-lbl">Статус</div><select class="status-sel" onchange="changeCol('${t.id}',this.value)">${COLS.map(c=>`<option value="${c.id}"${t.col===c.id?' selected':''}>${c.label}</option>`).join('')}</select></div>
+    <div class="mc"><div class="mc-lbl">Агент</div><div class="mc-val" style="color:${agClr}">${t.agent}</div></div>
+    <div class="mc"><div class="mc-lbl">Размер / Часы</div><div class="mc-val">${t.size||'—'} · ${t.hours}h</div></div>
+    <div class="mc"><div class="mc-lbl">Этап</div><div class="mc-val" style="color:${color}">${t.stage}</div></div>
+    <div class="mc mc-full"><div class="mc-lbl">Зависимости</div><div class="mc-val" style="font-size:11px;color:var(--tx2)">${t.deps||'нет'}</div></div>`;
+  chatHist=[];
+  const msgs=document.getElementById('ai-msgs');
+  msgs.innerHTML=`<div class="msg ai"><div class="msg-av ai">✦</div><div class="msg-bub">Задача <strong>${t.id}</strong>: <em>${t.title}</em><br><br>Готов помочь — декомпозиция, API-контракт, схема БД, промпт для Cursor.</div></div>`;
+  document.getElementById('task-ov').classList.add('open');
+  setTimeout(()=>document.getElementById('ai-in').focus(),200);
+}
+function closeTask(){document.getElementById('task-ov').classList.remove('open');activeId=null;}
+function changeCol(id,col){const t=tasks.find(x=>x.id===id);if(t){t.col=col;save();render();}}
+
+// ════════════════════════════════════════════
+// AI CHAT (task modal)
+// ════════════════════════════════════════════
+async function sendMsg(){
+  const inp=document.getElementById('ai-in');const text=inp.value.trim();if(!text||!activeId)return;
+  const t=tasks.find(x=>x.id===activeId);inp.value='';inp.style.height='auto';
+  appendTo('ai-msgs','user',text);chatHist.push({role:'user',content:text});
+  const btn=document.getElementById('ai-btn');btn.disabled=true;showTyping('ai-msgs');
+  const sys=`Ты — Claude, Tech Lead проекта mossb.ru. B2B-платформа оптовых закупок электрики.\nСтек: PostgreSQL, Elasticsearch, Redis, S3, Next.js, Node.js/TypeScript, Docker, GitHub Actions.\nЗадача: [${t.id}] ${t.title} | Этап: ${t.stage} | Трек: ${t.track} | Агент: ${t.agent}\nОписание: ${t.desc}\nОтвечай кратко и технично на русском.`;
+  try{
+    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,system:sys,messages:chatHist})});
+    const data=await res.json();const reply=data.content?.map(b=>b.text||'').join('')||'Ошибка.';
+    chatHist.push({role:'assistant',content:reply});hideTyping('ai-msgs');appendTo('ai-msgs','ai',reply);
+  }catch(e){hideTyping('ai-msgs');appendTo('ai-msgs','ai','⚠️ Ошибка API.');}
+  btn.disabled=false;
+}
+
+// ════════════════════════════════════════════
+// NEW TASK CHAT
+// ════════════════════════════════════════════
+function openNewTask(col){
+  newTaskCol=col||'backlog';ntHist=[];pendingTask=null;
+  document.getElementById('task-preview').classList.remove('show');
+  document.getElementById('nt-chat').innerHTML='';
+  // First greeting from Tech Lead
+  const greeting=GREETINGS[Math.floor(Math.random()*GREETINGS.length)];
+  appendTo('nt-chat','ai',greeting);
+  document.getElementById('nt-ov').classList.add('open');
+  setTimeout(()=>document.getElementById('nt-ta').focus(),150);
+}
+function closeNewTask(){document.getElementById('nt-ov').classList.remove('open');}
+
+async function sendNewTask(){
+  const inp=document.getElementById('nt-ta');const text=inp.value.trim();if(!text)return;
+  inp.value='';inp.style.height='auto';
+  appendTo('nt-chat','user',text);ntHist.push({role:'user',content:text});
+  const btn=document.getElementById('nt-btn');btn.disabled=true;showTyping('nt-chat');
+
+  const sys=`Ты — Claude, Tech Lead B2B-платформы mossb.ru (закупки электрики и систем безопасности).
+Стек: PostgreSQL, Elasticsearch, Redis, S3, Next.js, Node.js/TypeScript, Docker, GitHub Actions.
+Этапы: A (архитектура/инфра), R1 (MVP: каталог/поиск/корзина/оформление), R1.1 (B2B/RBAC/2FA/лимиты), R2 (BOM-хаб/EDI/склад/внешний API), R3+ (лояльность/маркет/SEO), F (стабилизация/запуск/поддержка).
+Агенты (все — ИИ, работают быстрее людей):
+- Claude: Backend, Architecture, LLM, Security, Search, Integrations, API
+- Cursor: Frontend, DevOps, Admin, Warehouse, Notifications, Content
+- Codex: QA, Testing, Utils, скрипты, парсеры
+- v0.dev: Design, UI-kit, компоненты
+
+Ведёшь живой диалог. Уточняй детали если нужно. Когда задача ясна — сформируй её и выведи в конце:
+TASK_JSON::{"title":"...","stage":"A|R1|R1.1|R2|R3+|F","agent":"Claude|Cursor|Codex|v0.dev","size":"S|M|L|XL","hours":N,"track":"Backend|Frontend|...", "desc":"Детальное ТЗ для агента: что реализовать, входные данные, результат, edge cases, критерии приёмки."}
+
+Оценка для ИИ-агентов: S=2-6ч (простой скрипт/компонент), M=8-20ч (фича со смежными частями), L=24-48ч (сложная фича с интеграцией), XL=48-80ч (подсистема).
+Общайся на русском, технично, как настоящий Tech Lead.`;
+
+  try{
+    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1400,system:sys,messages:ntHist})});
+    const data=await res.json();const reply=data.content?.map(b=>b.text||'').join('')||'Ошибка.';
+    ntHist.push({role:'assistant',content:reply});hideTyping('nt-chat');
+    const jm=reply.match(/TASK_JSON::(\{[\s\S]*?\})\s*$/);
+    if(jm){
+      try{
+        pendingTask=JSON.parse(jm[1]);
+        const clean=reply.replace(/TASK_JSON::[\s\S]*$/,'').trim();
+        if(clean)appendTo('nt-chat','ai',clean);
+        showPreview(pendingTask);
+      }catch(e){appendTo('nt-chat','ai',reply);}
+    }else{appendTo('nt-chat','ai',reply);}
+  }catch(e){hideTyping('nt-chat');appendTo('nt-chat','ai','⚠️ Ошибка API.');}
+  btn.disabled=false;
+}
+
+function showPreview(t){
+  document.getElementById('pv-title').textContent=t.title;
+  const stC=SC[t.stage]||'#888',agC=AGC[t.agent]||'#888';
+  document.getElementById('pv-grid').innerHTML=`
+    <div class="pv-chip"><div class="pv-chip-lbl">Этап</div><div class="pv-chip-val" style="color:${stC}">${t.stage}</div></div>
+    <div class="pv-chip"><div class="pv-chip-lbl">Агент</div><div class="pv-chip-val" style="color:${agC}">${t.agent}</div></div>
+    <div class="pv-chip"><div class="pv-chip-lbl">Размер / Часы</div><div class="pv-chip-val">${t.size} · ${t.hours}h</div></div>
+    <div class="pv-chip"><div class="pv-chip-lbl">Трек</div><div class="pv-chip-val">${t.track}</div></div>
+    <div class="pv-chip"><div class="pv-chip-lbl">Колонка</div><div class="pv-chip-val">${newTaskCol}</div></div>`;
+  document.getElementById('pv-desc').textContent=t.desc;
+  const pv=document.getElementById('task-preview');
+  pv.classList.add('show');
+  setTimeout(()=>pv.scrollIntoView({behavior:'smooth',block:'nearest'}),100);
+}
+
+function confirmTask(){
+  if(!pendingTask)return;
+  const s=pendingTask.stage;
+  const nums=tasks.filter(t=>t.stage===s).map(t=>parseInt(t.id.split('-').pop())).filter(n=>!isNaN(n));
+  const num=(Math.max(0,...nums)+1).toString().padStart(3,'0');
+  const id=`${s.replace(/[^A-Za-z0-9]/g,'')}-${num}`;
+  tasks.push({id,stage:s,col:newTaskCol,title:pendingTask.title,desc:pendingTask.desc||'—',agent:pendingTask.agent||'Claude',size:pendingTask.size||'M',hours:pendingTask.hours||8,track:pendingTask.track||'Backend',deps:''});
+  save();closeNewTask();render();
+}
+function reviseTask(){
+  document.getElementById('task-preview').classList.remove('show');
+  pendingTask=null;
+  appendTo('nt-chat','ai','Хорошо, что именно поменять? Этап, агента, оценку или описание?');
+  document.getElementById('nt-ta').focus();
+}
+
+// ════════════════════════════════════════════
+// MSG UTILS
+// ════════════════════════════════════════════
+function fmtMsg(t){
+  return t.replace(/\n/g,'<br>')
+    .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
+    .replace(/`([^`]+)`/g,'<code style="background:rgba(255,255,255,0.08);padding:1px 4px;border-radius:3px;font-size:11px">$1</code>');
+}
+function appendTo(cid,role,text){
+  const c=document.getElementById(cid);
+  const d=document.createElement('div');d.className=`msg ${role==='ai'?'ai':'user'}`;
+  d.innerHTML=`<div class="msg-av ${role==='ai'?'ai':'usr'}">${role==='ai'?'✦':'НБ'}</div><div class="msg-bub">${fmtMsg(text)}</div>`;
+  c.appendChild(d);c.scrollTop=c.scrollHeight;
+}
+const typEls={};
+function showTyping(cid){const c=document.getElementById(cid);const d=document.createElement('div');d.className='msg ai';d.innerHTML=`<div class="msg-av ai">✦</div><div class="msg-bub"><div class="typing"><span></span><span></span><span></span></div></div>`;c.appendChild(d);c.scrollTop=c.scrollHeight;typEls[cid]=d;}
+function hideTyping(cid){if(typEls[cid]){typEls[cid].remove();delete typEls[cid];}}
+
+// ════════════════════════════════════════════
+// KEYBOARD
+// ════════════════════════════════════════════
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeTask();closeNewTask();}});
+
+
+// ════════════════════════════════════════════
+// DRAG & DROP
+// ════════════════════════════════════════════
+function onDragStart(e){
+  isDragging=true;
+  const card=e.currentTarget;
+  dragId=card.dataset.id;
+  dragSourceCol=card.closest('.col-body').dataset.col;
+  e.dataTransfer.effectAllowed='move';
+  e.dataTransfer.setData('text/plain', dragId);
+  // Add dragging class after a tick so ghost image captures un-faded card
+  requestAnimationFrame(()=>card.classList.add('dragging'));
+}
+
+function onDragEnd(e){
+  e.currentTarget.classList.remove('dragging');
+  // clean all hover states
+  document.querySelectorAll('.col-body.drag-over').forEach(el=>el.classList.remove('drag-over'));
+  document.querySelectorAll('.col.drag-over-col').forEach(el=>el.classList.remove('drag-over-col'));
+  document.querySelectorAll('.card-drop-indicator').forEach(el=>el.remove());
+  // delay reset so click handler sees isDragging=true and ignores the click
+  setTimeout(()=>{ isDragging=false; dragId=null; dragSourceCol=null; }, 50);
+}
+
+function onDragEnter(e){
+  e.preventDefault();
+  const body=e.currentTarget;
+  body.classList.add('drag-over');
+  body.closest('.col').classList.add('drag-over-col');
+}
+
+function onDragLeave(e){
+  // Only remove if truly leaving the body (not entering a child)
+  const body=e.currentTarget;
+  if(!body.contains(e.relatedTarget)){
+    body.classList.remove('drag-over');
+    body.closest('.col').classList.remove('drag-over-col');
+    body.querySelectorAll('.card-drop-indicator').forEach(el=>el.remove());
+  }
+}
+
+function onDragOver(e){
+  e.preventDefault();
+  e.dataTransfer.dropEffect='move';
+  const body=e.currentTarget;
+
+  // Show drop indicator between cards
+  body.querySelectorAll('.card-drop-indicator').forEach(el=>el.remove());
+  const afterEl=getDragAfterEl(body, e.clientY);
+  const indicator=document.createElement('div');
+  indicator.className='card-drop-indicator';
+  if(afterEl){
+    body.insertBefore(indicator, afterEl);
+  } else {
+    body.appendChild(indicator);
+  }
+}
+
+function getDragAfterEl(container, y){
+  const draggableEls=[...container.querySelectorAll('.card:not(.dragging)')];
+  return draggableEls.reduce((closest, child)=>{
+    const box=child.getBoundingClientRect();
+    const offset=y - box.top - box.height/2;
+    if(offset<0 && offset>closest.offset) return {offset, element:child};
+    return closest;
+  }, {offset:-Infinity}).element;
+}
+
+function onDrop(e){
+  e.preventDefault();
+  const body=e.currentTarget;
+  const targetCol=body.dataset.col;
+  if(!dragId) return;
+
+  // Find position: which card are we dropping before?
+  const afterEl=getDragAfterEl(body, e.clientY);
+
+  // Update task data
+  const t=tasks.find(x=>x.id===dragId);
+  if(!t) return;
+  t.col=targetCol;
+  save();
+
+  // Move card in DOM without full re-render
+  const cardEl=document.querySelector(`.card[data-id="${dragId}"]`);
+  body.querySelectorAll('.card-drop-indicator').forEach(el=>el.remove());
+  body.classList.remove('drag-over');
+  body.closest('.col').classList.remove('drag-over-col');
+
+  // Remove col-empty if present
+  body.querySelectorAll('.col-empty').forEach(el=>el.remove());
+
+  if(afterEl){
+    body.insertBefore(cardEl, afterEl);
+  } else {
+    body.appendChild(cardEl);
+  }
+
+  // Add empty state to source col if now empty
+  if(dragSourceCol && dragSourceCol!==targetCol){
+    const srcBody=document.getElementById('col-'+dragSourceCol);
+    if(srcBody && srcBody.querySelectorAll('.card').length===0){
+      const empty=document.createElement('div');empty.className='col-empty';empty.textContent='Нет задач';
+      srcBody.appendChild(empty);
+    }
+  }
+
+  // Update counters
+  updateColCounts();
+  updateStats();
+}
+
+function updateColCounts(){
+  COLS.forEach(col=>{
+    const cnt=tasks.filter(t=>t.col===col.id).length;
+    // update column header count
+    const hcnt=document.getElementById('hcnt-'+col.id);
+    if(hcnt) hcnt.textContent=cnt;
+    // also col-cnt if exists
+    const ccnt=document.querySelector(`[data-col="${col.id}"]`)?.closest('.col')?.querySelector('.col-cnt');
+    if(ccnt) ccnt.textContent=cnt;
+  });
+}
+
+
+// ════════════════════════════════════════════
+// IMPORT (Excel / Text → Claude)
+// ════════════════════════════════════════════
+let importParsedTasks = [];
+let importRawData = null; // raw text or sheet data
+
+function openImport(){
+  importParsedTasks = [];
+  importRawData = null;
+  document.getElementById('imp-preview').style.display='none';
+  document.getElementById('imp-confirm-btn').style.display='none';
+  document.getElementById('imp-parse-btn').style.display='';
+  document.getElementById('imp-status').textContent='';
+  document.getElementById('imp-file-hint').style.display='none';
+  document.getElementById('imp-text-input').value='';
+  const fi = document.getElementById('imp-file-input');
+  if(fi) fi.value='';
+  switchImpTab('file');
+  document.getElementById('imp-ov').classList.add('open');
+}
+function closeImport(){ document.getElementById('imp-ov').classList.remove('open'); }
+
+function switchImpTab(tab){
+  document.getElementById('ipane-file').style.display = tab==='file'?'':'none';
+  document.getElementById('ipane-text').style.display = tab==='text'?'':'none';
+  document.getElementById('itab-file').classList.toggle('active', tab==='file');
+  document.getElementById('itab-text').classList.toggle('active', tab==='text');
+}
+
+// Drag-over on drop zone
+(function(){
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const dz = document.getElementById('imp-drop');
+    if(!dz) return;
+    dz.addEventListener('dragover', e=>{ e.preventDefault(); dz.classList.add('drag-active'); });
+    dz.addEventListener('dragleave', ()=>dz.classList.remove('drag-active'));
+    dz.addEventListener('drop', e=>{
+      e.preventDefault(); dz.classList.remove('drag-active');
+      const f = e.dataTransfer.files[0];
+      if(f) processImportFile(f);
+    });
+  });
+})();
+
+function handleFileSelect(input){
+  if(input.files[0]) processImportFile(input.files[0]);
+}
+
+function processImportFile(file){
+  const hint = document.getElementById('imp-file-hint');
+  hint.style.display='';
+  hint.textContent = '📄 Загружен: ' + file.name + ' (' + Math.round(file.size/1024) + ' KB)';
+
+  const reader = new FileReader();
+  reader.onload = e=>{
+    try{
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, {type:'array'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, {header:1});
+      // Build readable text for Claude
+      const lines = rows.filter(r=>r.some(c=>c!=null&&c!=='')).map(r=>r.join('	'));
+      importRawData = 'Файл: ' + file.name + '\n\n' + lines.slice(0,200).join('\n');
+      hint.textContent = '✓ ' + file.name + ' — ' + (rows.length-1) + ' строк загружено. Нажмите «Распознать через Claude».';
+      hint.style.color='var(--green)';
+    }catch(err){
+      hint.textContent = '❌ Ошибка чтения файла: ' + err.message;
+      hint.style.color='var(--red)';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function runImportParse(){
+  const isText = document.getElementById('itab-text').classList.contains('active');
+  let content = '';
+
+  if(isText){
+    content = document.getElementById('imp-text-input').value.trim();
+    if(!content){ document.getElementById('imp-status').textContent='Введите описание проекта.'; return; }
+  } else {
+    if(!importRawData){ document.getElementById('imp-status').textContent='Сначала загрузите файл.'; return; }
+    content = importRawData;
+  }
+
+  const btn = document.getElementById('imp-parse-btn');
+  btn.textContent='⏳ Анализирую...'; btn.disabled=true;
+  document.getElementById('imp-status').textContent='Claude разбирает данные...';
+
+  const systemPrompt = 'Ты — Tech Lead. Преобразуй входные данные в список задач для kanban-доски проекта.\n\n'
+    + 'Верни ТОЛЬКО валидный JSON массив (без markdown, без пояснений):\n'
+    + '[{"id":"","title":"","stage":"A|R1|R1.1|R2|R3+|F","track":"","agent":"Claude|Cursor|Codex|v0.dev|Николай","size":"S|M|L|XL","hours":0,"col":"backlog","priority":"low|mid|high","desc":""}]\n\n'
+    + 'Правила:\n'
+    + '- id: авто-генерируй как T-001, T-002... если не задан в исходнике\n'
+    + '- stage: определи по контексту (A=архитектура, R1=MVP, R1.1=B2B, R2=расширение, R3+=лояльность, F=запуск)\n'
+    + '- agent: Claude=backend/API/security/search, Cursor=frontend/devops/admin, Codex=QA/скрипты, v0.dev=UI/дизайн, Николай=PM/бизнес\n'
+    + '- size/hours: S=2-8ч, M=8-24ч, L=24-60ч, XL=60-120ч\n'
+    + '- Если это таблица Excel — каждая строка = задача (пропусти заголовок)\n'
+    + '- Если это текстовое описание — декомпозируй на 10-30 задач самостоятельно\n'
+    + '- desc: краткое ТЗ для агента (2-3 предложения)\n'
+    + '- Не добавляй ничего кроме JSON массива';
+
+  try{
+    const resp = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:4000,
+        system: systemPrompt,
+        messages:[{role:'user', content: isText
+          ? ('Описание проекта:\n\n' + content)
+          : ('Данные из таблицы (Excel/CSV):\n\n' + content)
+        }]
+      })
+    });
+    const data = await resp.json();
+    const raw = data.content.map(c=>c.text||'').join('');
+    // Strip possible markdown fences
+    const t1=raw.split('\u0060\u0060\u0060');const cleaned=(t1.length>1?t1[1]:raw).trim();
+    const parsed = JSON.parse(cleaned);
+    if(!Array.isArray(parsed) || !parsed.length) throw new Error('Пустой результат');
+    importParsedTasks = parsed;
+    renderImportPreview(parsed);
+    btn.textContent='🔄 Перераспознать'; btn.disabled=false;
+    document.getElementById('imp-status').textContent='';
+  }catch(err){
+    btn.textContent='🤖 Распознать через Claude'; btn.disabled=false;
+    document.getElementById('imp-status').textContent='Ошибка: ' + (err.message||'Проверьте API ключ');
+  }
+}
+
+function renderImportPreview(tasks){
+  const preview = document.getElementById('imp-preview');
+  const list = document.getElementById('imp-preview-list');
+  const count = document.getElementById('imp-preview-count');
+  count.textContent = '✓ Готово к импорту: ' + tasks.length + ' задач';
+  const SC2 = {A:'#4a9eff',R1:'#a78bfa','R1.1':'#fb923c',R2:'#f87171','R2+':'#f87171','R3+':'#34d399','F':'#fbbf24'};
+  list.innerHTML = tasks.map(t=>`
+    <div class="imp-task-row">
+      <span class="imp-task-stage" style="background:${SC2[t.stage]||'#888'}">${t.stage||'?'}</span>
+      <span class="imp-task-title" title="${t.title}">${t.title}</span>
+      <span class="imp-task-meta">${t.agent||''} · ${t.size||'M'} · ${t.hours||0}h</span>
+    </div>`).join('');
+  preview.style.display='';
+  document.getElementById('imp-confirm-btn').style.display='';
+}
+
+function clearImportPreview(){
+  importParsedTasks=[];
+  document.getElementById('imp-preview').style.display='none';
+  document.getElementById('imp-confirm-btn').style.display='none';
+}
+
+function confirmImport(){
+  if(!importParsedTasks.length) return;
+  // Generate unique IDs to avoid collisions
+  const existingIds = new Set(tasks.map(t=>t.id));
+  const toAdd = importParsedTasks.map((t,i)=>{
+    let id = t.id||('IMP-'+(i+1).toString().padStart(3,'0'));
+    while(existingIds.has(id)) id = id + '_';
+    existingIds.add(id);
+    return {...t, id, col:t.col||'backlog'};
+  });
+  tasks = [...tasks, ...toAdd];
+  save();
+  closeImport();
+  render();
+  // Show success toast
+  showToast('✓ Добавлено ' + toAdd.length + ' задач в ' + getActiveProject().name);
+}
+
+function showToast(msg){
+  const t = document.createElement('div');
+  t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--green);color:#000;padding:10px 22px;border-radius:10px;font-family:Syne,sans-serif;font-size:13px;font-weight:700;z-index:9999;box-shadow:0 4px 20px rgba(74,222,128,.4);animation:fadeInUp .3s ease;';
+  t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 3000);
+}
+// ════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════
+
+// ════════════════════════════════════════════
+// PROJECTS
+// ════════════════════════════════════════════
+const DEFAULT_PROJECT = {id:'mossb',name:'mossb.ru — B2B платформа',weeks:50,budget:5100000};
+
+function loadProjects(){
+  try{const s=localStorage.getItem('mossb_projects');if(s)return JSON.parse(s);}catch(e){}
+  return [DEFAULT_PROJECT];
+}
+function saveProjects(){
+  try{localStorage.setItem('mossb_projects',JSON.stringify(projects));}catch(e){}
+}
+function loadActiveProject(){
+  return localStorage.getItem('mossb_active_proj')||'mossb';
+}
+
+let projects = loadProjects();
+let activeProjId = loadActiveProject();
+
+function getActiveProject(){
+  return projects.find(p=>p.id===activeProjId)||projects[0]||DEFAULT_PROJECT;
+}
+
+function renderProjList(){
+  const list = document.getElementById('proj-list');
+  list.innerHTML = `<div class="proj-dd-list-label">Проекты (${projects.length})</div>` +
+    projects.map((p,i)=>{
+      const isActive = p.id===activeProjId;
+      const emoji = ['📋','🚀','⚡','🎯','🛠','💡'][i%6];
+      const weekStr = p.weeks ? p.weeks+'н' : '50н';
+      const budgetStr = p.budget ? fmtBudget(p.budget)+' ₽' : '5.1M ₽';
+      return `<div class="proj-dd-item ${isActive?'active-proj':''}">
+        <div class="proj-dd-icon-wrap">${emoji}</div>
+        <div class="proj-dd-info" onclick="switchProject('${p.id}')">
+          <span class="proj-dd-name">${p.name}</span>
+          <div class="proj-dd-meta">${weekStr} · ${budgetStr}</div>
+        </div>
+        <button class="proj-dd-gear" onclick="openProjSettings('${p.id}')" title="Настройки">⚙</button>
+      </div>`;
+    }).join('');
+}
+
+function toggleProjMenu(e){
+  e.stopPropagation();
+  const dd = document.getElementById('proj-dropdown');
+  const isOpen = dd.classList.contains('open');
+  closeAllDropdowns();
+  if(!isOpen){
+    renderProjList();
+    dd.classList.add('open');
+  }
+}
+
+function closeAllDropdowns(){
+  document.querySelectorAll('.proj-dropdown').forEach(d=>d.classList.remove('open'));
+}
+
+// Close on outside click
+document.addEventListener('click', ()=>closeAllDropdowns());
+
+function switchProject(id){
+  activeProjId = id;
+  localStorage.setItem('mossb_active_proj', id);
+  // Save current project tasks first (already saved on each change, but be safe)
+  // Load tasks for the new project
+  tasks = loadTasksForProject(id);
+  closeAllDropdowns();
+  curStage = 'all';
+  updateStageTabs();
+  applyProjectSettings();
+  render();
+}
+
+function applyProjectSettings(){
+  const p = getActiveProject();
+  const totalBudget = p.budget||5100000;
+  const totalWeeks  = p.weeks||50;
+  // Budget chip
+  const bt = document.querySelector('.b-total');
+  if(bt) bt.textContent = '/ ' + fmtBudget(totalBudget) + ' ₽';
+  // Timer weeks label
+  const wlbl = document.querySelector('#proj-timer .tc-lbl');
+  if(wlbl) wlbl.textContent = '/ '+totalWeeks+' нед';
+  // Header project title
+  const ptl = document.getElementById('proj-title-label');
+  if(ptl) ptl.textContent = p.name;
+  // Document title
+  document.title = p.name + ' — PlanKanban24';
+}
+
+function openNewProjectModal(){
+  closeAllDropdowns();
+  // Reuse settings modal but in "create" mode
+  editingProjId = '__new__';
+  document.getElementById('ps-name').value = '';
+  document.getElementById('ps-weeks').value = '50';
+  document.getElementById('ps-budget').value = '5100000';
+  document.getElementById('ps-proj-name-hint').textContent = 'Новый проект';
+  // Change modal title
+  const title = document.querySelector('.ps-title');
+  if(title) title.textContent = 'Новый проект';
+  const icon = document.querySelector('.ps-icon');
+  if(icon) icon.textContent = '🆕';
+  const saveBtn = document.querySelector('#ps-ov .btn-create');
+  if(saveBtn) saveBtn.textContent = 'Создать';
+  const delBtn = document.getElementById('btn-delete-proj');
+  if(delBtn) delBtn.classList.add('hidden');
+  document.getElementById('ps-ov').classList.add('open');
+  setTimeout(()=>document.getElementById('ps-name').focus(), 150);
+}
+
+function newProject(){ openNewProjectModal(); }
+
+// ── PROJECT SETTINGS ──
+let editingProjId = null;
+
+function openProjSettings(id){
+  closeAllDropdowns();
+  editingProjId = id;
+  const p = projects.find(x=>x.id===id)||DEFAULT_PROJECT;
+  document.getElementById('ps-name').value   = p.name;
+  document.getElementById('ps-weeks').value  = p.weeks||50;
+  document.getElementById('ps-budget').value = p.budget||5100000;
+  document.getElementById('ps-proj-name-hint').textContent = p.name;
+  // Reset to edit mode labels
+  const title = document.querySelector('.ps-title');
+  if(title) title.textContent = 'Настройки проекта';
+  const icon = document.querySelector('.ps-icon');
+  if(icon) icon.textContent = '⚙️';
+  const saveBtn = document.querySelector('#ps-ov .btn-create');
+  if(saveBtn) saveBtn.textContent = 'Сохранить';
+  const delBtn = document.getElementById('btn-delete-proj');
+  if(delBtn){
+    // Show delete for all projects; even mossb can be deleted if there are others
+    delBtn.classList.remove('hidden');
+  }
+  document.getElementById('ps-ov').classList.add('open');
+  setTimeout(()=>document.getElementById('ps-name').focus(), 150);
+}
+
+
+function deleteProject(){
+  if(!editingProjId || editingProjId==='__new__') return;
+  const p = projects.find(x=>x.id===editingProjId);
+  if(!p) return;
+  showDeleteConfirm(p);
+}
+
+function showDeleteConfirm(p){
+  const existing = document.getElementById('del-confirm-overlay');
+  if(existing) existing.remove();
+
+  const taskCount = loadTasksForProject(p.id).length;
+
+  const ov = document.createElement('div');
+  ov.id = 'del-confirm-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:600;background:rgba(0,0,0,.7);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;';
+  ov.innerHTML = `
+    <div style="background:var(--mbg);border:1px solid rgba(239,68,68,.3);border-radius:16px;padding:28px 28px 22px;max-width:400px;width:90%;box-shadow:0 24px 60px rgba(0,0,0,.6);">
+      <div style="font-size:28px;margin-bottom:12px;text-align:center;">🗑</div>
+      <div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700;color:var(--tx);text-align:center;margin-bottom:8px;">Удалить проект?</div>
+      <div style="font-size:13px;color:var(--tx2);text-align:center;line-height:1.6;margin-bottom:6px;">«${p.name}»</div>
+      <div style="font-size:12px;color:var(--red);text-align:center;margin-bottom:22px;opacity:.85;">${taskCount ? taskCount+' задач будут удалены безвозвратно.' : 'Проект пустой.'} Отменить нельзя.</div>
+      <div style="display:flex;gap:10px;justify-content:center;">
+        <button id="del-no" style="padding:0 22px;height:40px;background:var(--sf2);border:1.5px solid var(--bd2);border-radius:9px;color:var(--tx);font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;">Отмена</button>
+        <button id="del-yes" style="padding:0 22px;height:40px;background:#ef4444;border:none;border-radius:9px;color:#fff;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 16px rgba(239,68,68,.4);">Удалить</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(ov);
+
+  document.getElementById('del-no').onclick = ()=>ov.remove();
+  document.getElementById('del-yes').onclick = ()=>{
+    ov.remove();
+    doDeleteProject(p.id);
+  };
+}
+
+function doDeleteProject(projId){
+  try{ localStorage.removeItem(getTasksKey(projId)); }catch(e){}
+  projects = projects.filter(x=>x.id!==projId);
+  saveProjects();
+  closeProjSettings();
+  if(!projects.length){
+    projects = [{...DEFAULT_PROJECT}];
+    saveProjects();
+  }
+  switchProject(projects[0].id);
+}
+
+function closeProjSettings(){
+  document.getElementById('ps-ov').classList.remove('open');
+  editingProjId = null;
+}
+
+function saveProjSettings(){
+  if(!editingProjId) return;
+  const name   = document.getElementById('ps-name').value.trim();
+  const weeks  = parseInt(document.getElementById('ps-weeks').value)||50;
+  const budget = parseInt(document.getElementById('ps-budget').value)||5100000;
+  if(!name) { document.getElementById('ps-name').focus(); return; }
+
+  if(editingProjId === '__new__'){
+    // Create mode
+    const id = 'proj_'+Date.now();
+    projects.push({id, name, weeks, budget});
+    saveProjects();
+    closeProjSettings();
+    switchProject(id);
+  } else {
+    // Edit mode
+    const idx = projects.findIndex(p=>p.id===editingProjId);
+    if(idx<0) return;
+    projects[idx] = {...projects[idx], name, weeks, budget};
+    saveProjects();
+    closeProjSettings();
+    applyProjectSettings();
+    renderProjList();
+  }
+}
+
+// Also update TOTAL_BUDGET dynamically via getter override
+// (fmtBudget in updateStats uses the project budget)
+const _origUpdateStats = updateStats;
+updateStats = function(){
+  const p = getActiveProject();
+  // Patch earned calculation to use project budget
+  const done=tasks.filter(t=>t.col==='done').length;
+  const wip=tasks.filter(t=>t.col==='inprogress').length;
+  const back=tasks.filter(t=>t.col!=='done'&&t.col!=='inprogress').length;
+  document.getElementById('tl-done').textContent=done;
+  document.getElementById('tl-wip').textContent=wip;
+  document.getElementById('tl-back').textContent=back;
+  document.getElementById('progress-fill').style.width=tasks.length?Math.round(done/tasks.length*100)+'%':'0%';
+  const stages=[...new Set(tasks.map(t=>t.stage))];
+  let earned=0;
+  stages.forEach(s=>{const st=tasks.filter(t=>t.stage===s);if(!st.length)return;earned+=Math.round((STAGE_BUDGETS[s]||0)*st.filter(t=>t.col==='done').length/st.length);});
+  document.getElementById('b-earned').textContent=fmtBudget(earned)+' ₽';
+  const totalBudget = p.budget||5100000;
+  document.getElementById('b-bar').style.width=Math.round(earned/totalBudget*100)+'%';
+  const bt=document.querySelector('.b-total');
+  if(bt) bt.textContent='/ '+fmtBudget(totalBudget)+' ₽';
+  // stage counts now handled by renderStageTabs()
+};
+
+// Keyboard: Escape closes settings too
+const _origKeydown = document.onkeydown;
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape') closeProjSettings();
+});
+
+// Init projects
+applyProjectSettings();
+
+
+render();
+updateStageTabs();
+</script>
+
+<!-- PROJECT SETTINGS MODAL -->
+<div class="overlay" id="ps-ov" onclick="if(event.target===this)closeProjSettings()">
+  <div class="proj-settings-modal">
+    <div class="ps-header">
+      <div class="ps-icon">⚙️</div>
+      <div>
+        <div class="ps-title">Настройки проекта</div>
+        <div class="ps-sub" id="ps-proj-name-hint"></div>
+      </div>
+      <button class="tm-close" style="margin-left:auto" onclick="closeProjSettings()">✕</button>
+    </div>
+    <div class="ps-body">
+      <div class="ps-field">
+        <div class="ps-label">Название проекта</div>
+        <input class="ps-input" id="ps-name" placeholder="mossb.ru — B2B платформа">
+      </div>
+      <div class="ps-input-group">
+        <div class="ps-field">
+          <div class="ps-label">Срок выполнения (недель)</div>
+          <input class="ps-input" id="ps-weeks" type="number" min="1" placeholder="50">
+        </div>
+        <div class="ps-field">
+          <div class="ps-label">Стоимость проекта (₽)</div>
+          <div class="ps-budget-wrap">
+            <span class="ps-budget-prefix">₽</span>
+            <input class="ps-input has-prefix" id="ps-budget" type="number" placeholder="5100000">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="ps-footer">
+      <button class="btn-delete-proj" id="btn-delete-proj" onclick="deleteProject()">🗑 Удалить</button>
+      <div style="margin-left:auto;">
+        <button class="btn-create" onclick="saveProjSettings()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- IMPORT MODAL -->
+<div class="overlay" id="imp-ov" onclick="if(event.target===this)closeImport()">
+  <div class="import-modal">
+    <div class="ps-header">
+      <div class="ps-icon">📥</div>
+      <div>
+        <div class="ps-title">Импорт задач</div>
+        <div class="ps-sub">Excel / CSV или описание проекта текстом</div>
+      </div>
+      <button class="tm-close" style="margin-left:auto" onclick="closeImport()">✕</button>
+    </div>
+
+    <div class="imp-tabs">
+      <button class="imp-tab active" id="itab-file" onclick="switchImpTab('file')">📎 Файл Excel/CSV</button>
+      <button class="imp-tab" id="itab-text" onclick="switchImpTab('text')">✏️ Описание текстом</button>
+    </div>
+
+    <!-- FILE TAB -->
+    <div class="imp-pane" id="ipane-file">
+      <div class="imp-drop-zone" id="imp-drop" onclick="document.getElementById('imp-file-input').click()">
+        <div class="imp-drop-icon">📄</div>
+        <div class="imp-drop-label">Перетащите файл или нажмите для выбора</div>
+        <div class="imp-drop-sub">Поддерживается .xlsx, .xls, .csv</div>
+        <input type="file" id="imp-file-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleFileSelect(this)">
+      </div>
+      <div class="imp-file-hint" id="imp-file-hint" style="display:none"></div>
+    </div>
+
+    <!-- TEXT TAB -->
+    <div class="imp-pane" id="ipane-text" style="display:none">
+      <textarea class="imp-textarea" id="imp-text-input" placeholder="Опишите проект, его цели, этапы и функциональность. Claude сам декомпозирует на задачи.&#10;&#10;Например: «Нужно сделать B2B платформу для оптовой торговли. Регистрация компаний, каталог с 500k товаров, поиск, корзина, личный кабинет, интеграция с 1С...»"></textarea>
+    </div>
+
+    <!-- PREVIEW -->
+    <div id="imp-preview" style="display:none">
+      <div class="imp-preview-header">
+        <span id="imp-preview-count"></span>
+        <button class="imp-clear-btn" onclick="clearImportPreview()">✕ Очистить</button>
+      </div>
+      <div class="imp-preview-list" id="imp-preview-list"></div>
+    </div>
+
+    <div class="ps-footer">
+      <div id="imp-status" style="font-size:11px;color:var(--tx3);font-family:'DM Mono',monospace;"></div>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+        <button class="btn-create" id="imp-parse-btn" onclick="runImportParse()">🤖 Распознать через Claude</button>
+        <button class="btn-create" id="imp-confirm-btn" onclick="confirmImport()" style="display:none;background:rgba(74,222,128,.15);border-color:rgba(74,222,128,.45);">✓ Добавить задачи</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
