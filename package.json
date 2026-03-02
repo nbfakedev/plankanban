@@ -1,0 +1,9 @@
+{
+  "name": "plankanban",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "node --watch apps/api/server.js",
+    "start": "node apps/api/server.js"
+  }
+}

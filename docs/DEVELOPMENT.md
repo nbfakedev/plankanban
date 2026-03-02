@@ -20,3 +20,8 @@
 - ручные тесты по чек-листу в `AGENTS.md`
 - обновить `docs/API.md` и `docs/DATABASE.md` если менялись контракты/схема
 
+
+## Local run (updated)
+1) `npm install` in repo root
+2) `npm run dev` (API + static web on :3000)
+3) `npm start` (normal start without watch)
