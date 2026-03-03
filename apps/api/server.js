@@ -37,6 +37,40 @@ function sendNoContent(res) {
   res.status(204).end();
 }
 
+async function runInTransaction(work) {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await work(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {
+      // ignore rollback failures, surface original error
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function createAppError(statusCode, errorCode) {
+  const error = new Error(errorCode);
+  error.statusCode = statusCode;
+  error.errorCode = errorCode;
+  return error;
+}
+
+function isAppError(error) {
+  return (
+    error &&
+    Number.isInteger(error.statusCode) &&
+    typeof error.errorCode === 'string'
+  );
+}
+
 function createSignature(value) {
   return crypto
     .createHmac('sha256', JWT_SECRET)
@@ -452,8 +486,8 @@ function parseTaskMovePayload(payload) {
   return { value: { col: colResult.value } };
 }
 
-async function findProjectById(projectId) {
-  const result = await db.query(
+async function findProjectById(projectId, executor = db) {
+  const result = await executor.query(
     `
       SELECT id, name, created_by, llm_provider, llm_model, created_at, updated_at
       FROM projects
@@ -488,8 +522,8 @@ async function findVisibleProjectById(projectId, user) {
   return findProjectById(projectId);
 }
 
-async function findTaskById(taskId) {
-  const result = await db.query(
+async function findTaskById(taskId, executor = db) {
+  const result = await executor.query(
     `
       SELECT id, project_id, title, col, stage, assignee_user_id, track, agent,
              priority, hours, "desc", notes, deps, created_at, updated_at
@@ -502,10 +536,10 @@ async function findTaskById(taskId) {
   return result.rows[0] || null;
 }
 
-async function writeTaskEvent(params) {
+async function writeTaskEvent(params, executor = db) {
   const beforeState = sanitizeTaskForAudit(params.before);
   const afterState = sanitizeTaskForAudit(params.after);
-  await db.query(
+  await executor.query(
     `
       INSERT INTO task_events (
         project_id,
@@ -999,52 +1033,59 @@ app.post('/projects/:projectId/tasks', async (req, res) => {
     }
 
     const payload = parsed.value;
-    const created = await db.query(
-      `
-        INSERT INTO tasks (
-          project_id,
-          title,
-          col,
-          stage,
-          assignee_user_id,
-          track,
-          agent,
-          priority,
-          hours,
-          "desc",
-          notes,
-          deps
-        )
-        VALUES (
-          $1, $2, COALESCE($3, 'backlog'), $4, $5, $6, $7, COALESCE($8, 0), $9, $10, $11, $12
-        )
-        RETURNING id, project_id, title, col, stage, assignee_user_id, track, agent,
-                  priority, hours, "desc", notes, deps, created_at, updated_at
-      `,
-      [
-        projectId,
-        payload.title,
-        payload.col || null,
-        payload.stage ?? null,
-        payload.assignee_user_id ?? null,
-        payload.track ?? null,
-        payload.agent ?? null,
-        payload.priority ?? null,
-        payload.hours ?? null,
-        payload.desc ?? null,
-        payload.notes ?? null,
-        payload.deps ?? null,
-      ]
-    );
+    const task = await runInTransaction(async (tx) => {
+      const created = await tx.query(
+        `
+          INSERT INTO tasks (
+            project_id,
+            title,
+            col,
+            stage,
+            assignee_user_id,
+            track,
+            agent,
+            priority,
+            hours,
+            "desc",
+            notes,
+            deps
+          )
+          VALUES (
+            $1, $2, COALESCE($3, 'backlog'), $4, $5, $6, $7, COALESCE($8, 0), $9, $10, $11, $12
+          )
+          RETURNING id, project_id, title, col, stage, assignee_user_id, track, agent,
+                    priority, hours, "desc", notes, deps, created_at, updated_at
+        `,
+        [
+          projectId,
+          payload.title,
+          payload.col || null,
+          payload.stage ?? null,
+          payload.assignee_user_id ?? null,
+          payload.track ?? null,
+          payload.agent ?? null,
+          payload.priority ?? null,
+          payload.hours ?? null,
+          payload.desc ?? null,
+          payload.notes ?? null,
+          payload.deps ?? null,
+        ]
+      );
 
-    const task = created.rows[0];
-    await writeTaskEvent({
-      projectId,
-      taskId: task.id,
-      actorUserId: user.id,
-      action: 'create',
-      before: {},
-      after: task,
+      const createdTask = created.rows[0];
+      await writeTaskEvent(
+        {
+          projectId,
+          taskId: createdTask.id,
+          actorUserId: user.id,
+          action: 'create',
+          before: {},
+          after: createdTask,
+        },
+        tx
+      );
+
+      return createdTask;
     });
 
     sendJson(res, 201, { task });
@@ -1080,36 +1121,47 @@ app.patch('/tasks/:id', async (req, res) => {
   }
 
   try {
-    const before = await findTaskById(id);
-    if (!before) {
-      sendJson(res, 404, { error: 'task_not_found' });
-      return;
-    }
+    const after = await runInTransaction(async (tx) => {
+      const before = await findTaskById(id, tx);
+      if (!before) {
+        throw createAppError(404, 'task_not_found');
+      }
 
-    const update = buildTaskUpdateStatement(parsed.value);
-    const result = await db.query(
-      `
-        UPDATE tasks
-        SET ${update.setClause}
-        WHERE id = $${update.values.length + 1}
-        RETURNING id, project_id, title, col, stage, assignee_user_id, track, agent,
-                  priority, hours, "desc", notes, deps, created_at, updated_at
-      `,
-      [...update.values, id]
-    );
-    const after = result.rows[0];
+      const update = buildTaskUpdateStatement(parsed.value);
+      const result = await tx.query(
+        `
+          UPDATE tasks
+          SET ${update.setClause}
+          WHERE id = $${update.values.length + 1}
+          RETURNING id, project_id, title, col, stage, assignee_user_id, track, agent,
+                    priority, hours, "desc", notes, deps, created_at, updated_at
+        `,
+        [...update.values, id]
+      );
+      const updatedTask = result.rows[0];
 
-    await writeTaskEvent({
-      projectId: after.project_id,
-      taskId: after.id,
-      actorUserId: user.id,
-      action: 'update',
-      before,
-      after,
+      await writeTaskEvent(
+        {
+          projectId: updatedTask.project_id,
+          taskId: updatedTask.id,
+          actorUserId: user.id,
+          action: 'update',
+          before,
+          after: updatedTask,
+        },
+        tx
+      );
+
+      return updatedTask;
     });
 
     sendJson(res, 200, { task: after });
   } catch (error) {
+    if (isAppError(error)) {
+      sendJson(res, error.statusCode, { error: error.errorCode });
+      return;
+    }
+
     if (error && error.code === '23503') {
       sendJson(res, 400, { error: 'invalid_payload' });
       return;
@@ -1141,35 +1193,46 @@ app.post('/tasks/:id/move', async (req, res) => {
   }
 
   try {
-    const before = await findTaskById(id);
-    if (!before) {
-      sendJson(res, 404, { error: 'task_not_found' });
-      return;
-    }
+    const after = await runInTransaction(async (tx) => {
+      const before = await findTaskById(id, tx);
+      if (!before) {
+        throw createAppError(404, 'task_not_found');
+      }
 
-    const moved = await db.query(
-      `
-        UPDATE tasks
-        SET col = $1, updated_at = NOW()
-        WHERE id = $2
-        RETURNING id, project_id, title, col, stage, assignee_user_id, track, agent,
-                  priority, hours, "desc", notes, deps, created_at, updated_at
-      `,
-      [parsed.value.col, id]
-    );
-    const after = moved.rows[0];
+      const moved = await tx.query(
+        `
+          UPDATE tasks
+          SET col = $1, updated_at = NOW()
+          WHERE id = $2
+          RETURNING id, project_id, title, col, stage, assignee_user_id, track, agent,
+                    priority, hours, "desc", notes, deps, created_at, updated_at
+        `,
+        [parsed.value.col, id]
+      );
+      const movedTask = moved.rows[0];
 
-    await writeTaskEvent({
-      projectId: after.project_id,
-      taskId: after.id,
-      actorUserId: user.id,
-      action: 'move',
-      before,
-      after,
+      await writeTaskEvent(
+        {
+          projectId: movedTask.project_id,
+          taskId: movedTask.id,
+          actorUserId: user.id,
+          action: 'move',
+          before,
+          after: movedTask,
+        },
+        tx
+      );
+
+      return movedTask;
     });
 
     sendJson(res, 200, { task: after });
   } catch (error) {
+    if (isAppError(error)) {
+      sendJson(res, error.statusCode, { error: error.errorCode });
+      return;
+    }
+
     console.error('POST /tasks/:id/move failed:', error.message);
     if (isDevelopment() && error.stack) {
       console.error(error.stack);

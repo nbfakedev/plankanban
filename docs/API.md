@@ -131,6 +131,7 @@ GET `/projects`
 ```
 - 401: `{ "error": "unauthorized" }`
 - 403: `{ "error": "account_inactive|forbidden" }`
+- 500: `{ "error": "projects_unavailable" }`
 
 POST `/projects`
 - roles: `admin`, `techlead`
@@ -152,6 +153,7 @@ POST `/projects`
 - 400: `{ "error": "invalid_payload" }`
 - 401: `{ "error": "unauthorized" }`
 - 403: `{ "error": "account_inactive|forbidden" }`
+- 500: `{ "error": "projects_unavailable" }`
 
 GET `/projects/:id`
 - roles: `admin`, `techlead`, `employee`
@@ -172,9 +174,15 @@ GET `/projects/:id`
 ```
 - 400: `{ "error": "invalid_project_id" }`
 - 404: `{ "error": "project_not_found" }`
+- 500: `{ "error": "projects_unavailable" }`
 
 ## Tasks API
 All endpoints require `Authorization: Bearer <token>`.
+
+Audit behavior for task mutations:
+- `POST /projects/:projectId/tasks`, `PATCH /tasks/:id`, `POST /tasks/:id/move` write one row to `task_events`.
+- Stored fields: `actor_user_id`, `action` (`create|update|move`), `before` (JSON), `after` (JSON), `created_at`.
+- Task change and audit insert are committed in a single DB transaction.
 
 GET `/projects/:projectId/tasks`
 - roles: `admin`, `techlead`, `employee`
@@ -205,6 +213,7 @@ GET `/projects/:projectId/tasks`
 ```
 - 400: `{ "error": "invalid_project_id" }`
 - 404: `{ "error": "project_not_found" }`
+- 500: `{ "error": "tasks_unavailable" }`
 
 POST `/projects/:projectId/tasks`
 - roles: `admin`, `techlead`
@@ -219,6 +228,7 @@ POST `/projects/:projectId/tasks`
 - 201: `{ "task": { ...task } }`
 - 400: `{ "error": "invalid_project_id|invalid_payload" }`
 - 404: `{ "error": "project_not_found" }`
+- 500: `{ "error": "tasks_unavailable" }`
 
 PATCH `/tasks/:id`
 - roles: `admin`, `techlead`
@@ -226,6 +236,7 @@ PATCH `/tasks/:id`
 - 200: `{ "task": { ...task } }`
 - 400: `{ "error": "invalid_task_id|invalid_payload" }`
 - 404: `{ "error": "task_not_found" }`
+- 500: `{ "error": "tasks_unavailable" }`
 
 POST `/tasks/:id/move`
 - roles: `admin`, `techlead`
@@ -233,6 +244,7 @@ POST `/tasks/:id/move`
 - 200: `{ "task": { ...task } }`
 - 400: `{ "error": "invalid_task_id|invalid_payload" }`
 - 404: `{ "error": "task_not_found" }`
+- 500: `{ "error": "tasks_unavailable" }`
 
 PowerShell (`curl.exe`) examples:
 ```powershell
