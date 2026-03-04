@@ -5,6 +5,20 @@ DROP INDEX IF EXISTS idx_llm_requests_actor_user_id;
 DROP INDEX IF EXISTS idx_llm_requests_project_id;
 
 ALTER TABLE llm_requests
+DROP CONSTRAINT IF EXISTS llm_requests_project_id_fkey;
+
+ALTER TABLE llm_requests
+ADD CONSTRAINT llm_requests_project_id_fkey
+FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE;
+
+ALTER TABLE llm_requests
+DROP CONSTRAINT IF EXISTS llm_requests_actor_user_id_fkey;
+
+ALTER TABLE llm_requests
+ADD CONSTRAINT llm_requests_actor_user_id_fkey
+FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE llm_requests
 DROP COLUMN IF EXISTS error_code;
 
 ALTER TABLE llm_requests

@@ -294,11 +294,30 @@ Provider/model resolution:
 - `provider` and `model` from request are used if provided.
 - otherwise fallback to `LLM_DEFAULT_PROVIDER` and `LLM_DEFAULT_MODEL`.
 - project-level provider/model settings are not used yet.
+- `GET /api/llm/models?provider=anthropic` returns:
+  - models from `LLM_ALLOWED_MODELS_ANTHROPIC` (CSV), if set
+  - otherwise built-in minimal list.
 
 Rate limit:
 - in-memory per-user limit for `/api/llm/chat`
 - default: `30` requests per minute (env: `LLM_RATE_LIMIT_PER_MINUTE`)
 - over limit: `429 { "error": "rate_limited" }`
+
+Provider adapter (anthropic):
+- if `CLOUDFLARE_WORKER_URL` is set: POST `{CLOUDFLARE_WORKER_URL}/v1/messages`
+  - headers: `x-kanban-secret`, `x-api-key`
+- otherwise: POST `https://api.anthropic.com/v1/messages`
+  - headers: `x-api-key`, `anthropic-version: 2023-06-01`
+- `system` messages are joined into one `system` string; only `user|assistant` stay in `messages`.
+- provider error body is not exposed to API clients.
+
+Missing key + stub behavior:
+- if `ANTHROPIC_API_KEY` is missing/empty and `LLM_STUB_MODE=1`:
+  - `200 OK` with predictable `text = "LLM_STUB_OK"`
+  - `llm_requests.status='ok'`, `response_meta.stub=true`
+- if `ANTHROPIC_API_KEY` is missing/empty and stub mode is off:
+  - `502 { "error": "llm_unavailable" }`
+  - `llm_requests.status='error'`, `error_code='missing_api_key'`
 
 POST `/api/llm/chat`
 - roles:

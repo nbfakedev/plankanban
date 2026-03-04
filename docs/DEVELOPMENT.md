@@ -59,19 +59,26 @@ Stop local services:
    - `npm run dev`
 
 ## LLM Gateway local test
-1) Set required env vars in `.env`:
+1) Set env vars in `.env`:
    - `LLM_DEFAULT_PROVIDER=anthropic`
    - `LLM_DEFAULT_MODEL=claude-sonnet-4`
    - `LLM_RATE_LIMIT_PER_MINUTE=30`
-   - `ANTHROPIC_API_KEY=<your_api_key>`
+   - `LLM_ALLOWED_MODELS_ANTHROPIC=claude-sonnet-4,claude-3-5-sonnet-latest`
+   - `LLM_STUB_MODE=1` (for local tests without real key)
+   - `ANTHROPIC_API_KEY=` (can stay empty in stub mode)
    - optional Worker mode:
-     - `CLOUDFLARE_WORKER_URL=https://<worker-host>`
-     - `WORKER_SHARED_SECRET=<shared_secret>`
+      - `CLOUDFLARE_WORKER_URL=https://<worker-host>`
+      - `WORKER_SHARED_SECRET=<shared_secret>`
 2) Run migrations and start API:
    - `npm run db:migrate`
    - `npm run dev`
-3) Call LLM gateway:
+3) Call LLM gateway (`purpose=chat`):
    - `curl.exe -sS -X POST "http://localhost:3000/api/llm/chat" -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data "{\"purpose\":\"chat\",\"messages\":[{\"role\":\"user\",\"content\":\"Give me 2 sprint tasks\"}]}" `
+4) Verify `llm_requests` insert in stub mode (`status='ok'`, `response_meta.stub=true`):
+   - `docker compose exec db psql -U kanban -d kanban -c "select id, status, error_code, response_meta from llm_requests order by created_at desc limit 3;"`
+5) Disable stub (`LLM_STUB_MODE=0`) with empty key and retry `/api/llm/chat`:
+   - expected: `502 {"error":"llm_unavailable"}`
+   - DB audit: `status='error'`, `error_code='missing_api_key'`
 
 ## Manual API checklist (Projects/Tasks)
 1) Login as admin and save token:
@@ -94,7 +101,9 @@ Stop local services:
    - `curl.exe -sS -X POST "http://localhost:3000/auth/login" -H "Content-Type: application/json" --data "{\"email\":\"admin@local.dev\",\"password\":\"admin123\"}"`
 2) Call `/api/llm/chat` with `purpose=chat`:
    - `curl.exe -sS -X POST "http://localhost:3000/api/llm/chat" -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data "{\"purpose\":\"chat\",\"messages\":[{\"role\":\"user\",\"content\":\"Return 1 short idea\"}]}" `
-3) Verify DB audit row is inserted (`status='ok'`):
-   - `docker compose exec db psql -U kanban -d kanban -c "select id, purpose, provider, model, status, created_at from llm_requests order by created_at desc limit 5;"`
+3) Verify DB audit row is inserted:
+   - stub mode: `status='ok'` and `response_meta->>'stub' = 'true'`
+   - no-stub + empty key: `status='error'` and `error_code='missing_api_key'`
+   - `docker compose exec db psql -U kanban -d kanban -c "select id, purpose, provider, model, status, error_code, response_meta, created_at from llm_requests order by created_at desc limit 5;"`
 4) Verify RBAC restrictions for employee:
    - employee call with `purpose=new_task` or `purpose=import_parse` returns `403 forbidden`.

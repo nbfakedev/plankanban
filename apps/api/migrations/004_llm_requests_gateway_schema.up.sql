@@ -15,11 +15,30 @@ CREATE TABLE IF NOT EXISTS llm_requests (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'llm_requests'
+      AND column_name = 'cost_estimate'
+  ) AND NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'llm_requests'
+      AND column_name = 'cost_estimate_usd'
+  ) THEN
+    ALTER TABLE llm_requests RENAME COLUMN cost_estimate TO cost_estimate_usd;
+  END IF;
+END $$;
+
 ALTER TABLE llm_requests
 ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE SET NULL;
 
 ALTER TABLE llm_requests
-ADD COLUMN IF NOT EXISTS actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL;
+ADD COLUMN IF NOT EXISTS actor_user_id UUID REFERENCES users(id);
 
 ALTER TABLE llm_requests
 ADD COLUMN IF NOT EXISTS purpose TEXT;
@@ -61,29 +80,10 @@ ALTER TABLE llm_requests
 ALTER COLUMN actor_user_id SET NOT NULL;
 
 ALTER TABLE llm_requests
-ALTER COLUMN request_meta SET DEFAULT '{}'::jsonb;
+ALTER COLUMN purpose SET NOT NULL;
 
 ALTER TABLE llm_requests
-ALTER COLUMN response_meta SET DEFAULT '{}'::jsonb;
-
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'llm_requests'
-      AND column_name = 'cost_estimate'
-  ) AND NOT EXISTS (
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'llm_requests'
-      AND column_name = 'cost_estimate_usd'
-  ) THEN
-    ALTER TABLE llm_requests RENAME COLUMN cost_estimate TO cost_estimate_usd;
-  END IF;
-END $$;
+ALTER COLUMN provider SET NOT NULL;
 
 DO $$
 BEGIN
@@ -100,7 +100,73 @@ BEGIN
       AND table_name = 'llm_requests'
       AND column_name = 'cost_estimate_usd'
   ) THEN
+    UPDATE llm_requests
+    SET cost_estimate_usd = COALESCE(cost_estimate_usd, cost_estimate)
+    WHERE cost_estimate IS NOT NULL;
     ALTER TABLE llm_requests DROP COLUMN cost_estimate;
+  END IF;
+END $$;
+
+ALTER TABLE llm_requests
+ALTER COLUMN model SET NOT NULL;
+
+ALTER TABLE llm_requests
+ALTER COLUMN request_meta SET DEFAULT '{}'::jsonb;
+
+ALTER TABLE llm_requests
+ALTER COLUMN request_meta SET NOT NULL;
+
+ALTER TABLE llm_requests
+ALTER COLUMN response_meta SET DEFAULT '{}'::jsonb;
+
+ALTER TABLE llm_requests
+ALTER COLUMN response_meta SET NOT NULL;
+
+ALTER TABLE llm_requests
+ALTER COLUMN status SET NOT NULL;
+
+ALTER TABLE llm_requests
+ALTER COLUMN created_at SET DEFAULT NOW();
+
+ALTER TABLE llm_requests
+ALTER COLUMN created_at SET NOT NULL;
+
+ALTER TABLE llm_requests
+DROP CONSTRAINT IF EXISTS llm_requests_project_id_fkey;
+
+ALTER TABLE llm_requests
+ADD CONSTRAINT llm_requests_project_id_fkey
+FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL;
+
+ALTER TABLE llm_requests
+DROP CONSTRAINT IF EXISTS llm_requests_actor_user_id_fkey;
+
+ALTER TABLE llm_requests
+ADD CONSTRAINT llm_requests_actor_user_id_fkey
+FOREIGN KEY (actor_user_id) REFERENCES users(id);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'llm_requests_purpose_check'
+      AND conrelid = 'llm_requests'::regclass
+  ) THEN
+    ALTER TABLE llm_requests
+    ADD CONSTRAINT llm_requests_purpose_check
+    CHECK (purpose IN ('new_task', 'chat', 'import_parse'));
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'llm_requests_status_check'
+      AND conrelid = 'llm_requests'::regclass
+  ) THEN
+    ALTER TABLE llm_requests
+    ADD CONSTRAINT llm_requests_status_check
+    CHECK (status IN ('ok', 'error'));
   END IF;
 END $$;
 

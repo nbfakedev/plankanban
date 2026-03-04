@@ -52,14 +52,18 @@
 
 ## llm_requests
 - id (uuid)
-- project_id
-- actor_user_id
-- purpose
-- provider
-- model
-- input_tokens, output_tokens
-- cost_estimate
+- project_id (uuid, nullable)
+- actor_user_id (uuid, not null)
+- purpose (new_task|chat|import_parse)
+- provider (text)
+- model (text)
+- request_meta (jsonb)
+- response_meta (jsonb)
+- input_tokens (int, nullable)
+- output_tokens (int, nullable)
+- cost_estimate_usd (numeric, nullable)
 - status (ok|error)
+- error_code (text, nullable)
 - created_at
 
 Миграции: хранить в `apps/api/migrations/` (SQL).

@@ -31,6 +31,7 @@ const LLM_RATE_LIMIT_PER_MINUTE = parsePositiveInteger(
   process.env.LLM_RATE_LIMIT_PER_MINUTE,
   30
 );
+const LLM_STUB_MODE = process.env.LLM_STUB_MODE === '1';
 const CLOUDFLARE_WORKER_URL = normalizeNullableString(
   process.env.CLOUDFLARE_WORKER_URL || process.env.CF_WORKER_URL
 );
@@ -394,10 +395,6 @@ async function writeLlmRequest(params, executor = db) {
 }
 
 async function sendAnthropicRequest(body) {
-  if (!ANTHROPIC_API_KEY) {
-    throw createAppError(502, 'llm_unavailable');
-  }
-
   const workerUsed = Boolean(CLOUDFLARE_WORKER_URL);
   const endpoint = workerUsed
     ? `${CLOUDFLARE_WORKER_URL.replace(/\/+$/, '')}/v1/messages`
@@ -409,9 +406,7 @@ async function sendAnthropicRequest(body) {
   };
 
   if (workerUsed) {
-    if (WORKER_SHARED_SECRET) {
-      headers['x-kanban-secret'] = WORKER_SHARED_SECRET;
-    }
+    headers['x-kanban-secret'] = WORKER_SHARED_SECRET || '';
   } else {
     headers['anthropic-version'] = ANTHROPIC_API_VERSION;
   }
@@ -1691,6 +1686,83 @@ app.post('/api/llm/chat', async (req, res) => {
 
   let providerStatusCode = null;
   let workerUsed = Boolean(CLOUDFLARE_WORKER_URL);
+
+  if (!ANTHROPIC_API_KEY) {
+    const responseMeta = {
+      worker_used: workerUsed,
+      latency_ms: Date.now() - startedAt,
+      provider_http_status: null,
+      response_id: null,
+      stop_reason: null,
+      stub: LLM_STUB_MODE,
+    };
+
+    if (LLM_STUB_MODE) {
+      let requestId;
+      try {
+        requestId = await writeLlmRequest({
+          projectId: parsed.value.project_id || null,
+          actorUserId: user.id,
+          purpose: parsed.value.purpose,
+          provider: resolved.value.provider,
+          model: resolved.value.model,
+          requestMeta,
+          responseMeta,
+          inputTokens: 0,
+          outputTokens: 0,
+          costEstimateUsd: null,
+          status: 'ok',
+          errorCode: null,
+        });
+      } catch (error) {
+        console.error('LLM request audit write failed:', error.message);
+        if (isDevelopment() && error.stack) {
+          console.error(error.stack);
+        }
+        sendJson(res, 500, { error: 'internal_error' });
+        return;
+      }
+
+      sendJson(res, 200, {
+        text: 'LLM_STUB_OK',
+        provider: resolved.value.provider,
+        model: resolved.value.model,
+        usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+        },
+        request_id: requestId,
+      });
+      return;
+    }
+
+    try {
+      await writeLlmRequest({
+        projectId: parsed.value.project_id || null,
+        actorUserId: user.id,
+        purpose: parsed.value.purpose,
+        provider: resolved.value.provider,
+        model: resolved.value.model,
+        requestMeta,
+        responseMeta,
+        inputTokens: null,
+        outputTokens: null,
+        costEstimateUsd: null,
+        status: 'error',
+        errorCode: 'missing_api_key',
+      });
+    } catch (error) {
+      console.error('LLM request audit write failed:', error.message);
+      if (isDevelopment() && error.stack) {
+        console.error(error.stack);
+      }
+      sendJson(res, 500, { error: 'internal_error' });
+      return;
+    }
+
+    sendJson(res, 502, { error: 'llm_unavailable' });
+    return;
+  }
 
   try {
     const providerResult = await sendAnthropicRequest(anthropicRequest.value);
