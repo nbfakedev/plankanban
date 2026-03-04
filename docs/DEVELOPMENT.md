@@ -58,6 +58,21 @@ Stop local services:
 5) Start API with env file:
    - `npm run dev`
 
+## LLM Gateway local test
+1) Set required env vars in `.env`:
+   - `LLM_DEFAULT_PROVIDER=anthropic`
+   - `LLM_DEFAULT_MODEL=claude-sonnet-4`
+   - `LLM_RATE_LIMIT_PER_MINUTE=30`
+   - `ANTHROPIC_API_KEY=<your_api_key>`
+   - optional Worker mode:
+     - `CLOUDFLARE_WORKER_URL=https://<worker-host>`
+     - `WORKER_SHARED_SECRET=<shared_secret>`
+2) Run migrations and start API:
+   - `npm run db:migrate`
+   - `npm run dev`
+3) Call LLM gateway:
+   - `curl.exe -sS -X POST "http://localhost:3000/api/llm/chat" -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data "{\"purpose\":\"chat\",\"messages\":[{\"role\":\"user\",\"content\":\"Give me 2 sprint tasks\"}]}" `
+
 ## Manual API checklist (Projects/Tasks)
 1) Login as admin and save token:
    - `curl.exe -sS -X POST "http://localhost:3000/auth/login" -H "Content-Type: application/json" --data "{\"email\":\"admin@local.dev\",\"password\":\"admin123\"}"`
@@ -73,3 +88,13 @@ Stop local services:
    - `curl.exe -sS -X POST "http://localhost:3000/tasks/<TASK_ID>/move" -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data "{\"status\":\"doing\"}"`
 7) RBAC check:
    - employee token gets `403 forbidden` on project/task create-update-move, and sees only assigned tasks in `GET /projects/<PROJECT_ID>/tasks`.
+
+## Manual API checklist (LLM Gateway)
+1) Login and save token:
+   - `curl.exe -sS -X POST "http://localhost:3000/auth/login" -H "Content-Type: application/json" --data "{\"email\":\"admin@local.dev\",\"password\":\"admin123\"}"`
+2) Call `/api/llm/chat` with `purpose=chat`:
+   - `curl.exe -sS -X POST "http://localhost:3000/api/llm/chat" -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" --data "{\"purpose\":\"chat\",\"messages\":[{\"role\":\"user\",\"content\":\"Return 1 short idea\"}]}" `
+3) Verify DB audit row is inserted (`status='ok'`):
+   - `docker compose exec db psql -U kanban -d kanban -c "select id, purpose, provider, model, status, created_at from llm_requests order by created_at desc limit 5;"`
+4) Verify RBAC restrictions for employee:
+   - employee call with `purpose=new_task` or `purpose=import_parse` returns `403 forbidden`.

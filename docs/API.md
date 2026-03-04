@@ -287,5 +287,122 @@ curl.exe -sS "http://localhost:3000/projects/$projectId/tasks" `
   --data-binary @-
 ```
 
-## Not Implemented Yet
-- LLM API
+## LLM Gateway API
+All endpoints require `Authorization: Bearer <token>`.
+
+Provider/model resolution:
+- `provider` and `model` from request are used if provided.
+- otherwise fallback to `LLM_DEFAULT_PROVIDER` and `LLM_DEFAULT_MODEL`.
+- project-level provider/model settings are not used yet.
+
+Rate limit:
+- in-memory per-user limit for `/api/llm/chat`
+- default: `30` requests per minute (env: `LLM_RATE_LIMIT_PER_MINUTE`)
+- over limit: `429 { "error": "rate_limited" }`
+
+POST `/api/llm/chat`
+- roles:
+  - `admin`, `techlead`: `purpose = new_task|import_parse|chat`
+  - `employee`: `purpose = chat` only
+- body:
+```json
+{
+  "purpose": "chat",
+  "project_id": "uuid-optional",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4",
+  "messages": [
+    { "role": "system", "content": "You are helpful." },
+    { "role": "user", "content": "Draft 3 task ideas." }
+  ],
+  "params": {
+    "temperature": 0.2,
+    "max_tokens": 512
+  }
+}
+```
+- 200:
+```json
+{
+  "text": "assistant text",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4",
+  "usage": {
+    "input_tokens": 123,
+    "output_tokens": 45
+  },
+  "request_id": "uuid"
+}
+```
+- 400: `{ "error": "invalid_payload" }`
+- 401: `{ "error": "unauthorized" }`
+- 403: `{ "error": "forbidden|account_inactive" }`
+- 429: `{ "error": "rate_limited" }`
+- 502: `{ "error": "llm_unavailable" }`
+- 500: `{ "error": "internal_error" }`
+
+GET `/api/llm/models?provider=anthropic`
+- roles: any authenticated role
+- 200:
+```json
+{
+  "provider": "anthropic",
+  "models": [
+    "claude-sonnet-4",
+    "claude-3-5-sonnet-latest"
+  ]
+}
+```
+- 400: `{ "error": "invalid_payload" }`
+- 401: `{ "error": "unauthorized" }`
+- 403: `{ "error": "account_inactive|forbidden" }`
+
+PowerShell (`curl.exe`) examples:
+```powershell
+$token = "PASTE_TOKEN_HERE"
+
+curl.exe -sS "http://localhost:3000/api/llm/models?provider=anthropic" `
+  -H "Authorization: Bearer $token"
+
+@'
+{
+  "purpose": "chat",
+  "messages": [
+    { "role": "system", "content": "You are a concise PM assistant." },
+    { "role": "user", "content": "Give me 3 backlog task ideas for auth hardening." }
+  ],
+  "params": { "temperature": 0.2, "max_tokens": 256 }
+}
+'@ | curl.exe -sS -X POST "http://localhost:3000/api/llm/chat" `
+  -H "Authorization: Bearer $token" `
+  -H "Content-Type: application/json" `
+  --data-binary @-
+```
+
+PowerShell (`Invoke-RestMethod`) examples:
+```powershell
+$token = "PASTE_TOKEN_HERE"
+$headers = @{ Authorization = "Bearer $token" }
+
+Invoke-RestMethod -Method Get `
+  -Uri "http://localhost:3000/api/llm/models?provider=anthropic" `
+  -Headers $headers
+
+$body = @{
+  purpose = "chat"
+  messages = @(
+    @{ role = "system"; content = "You are a concise PM assistant." }
+    @{ role = "user"; content = "Give me 3 backlog task ideas for auth hardening." }
+  )
+  params = @{
+    temperature = 0.2
+    max_tokens = 256
+  }
+} | ConvertTo-Json -Depth 6 -Compress
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:3000/api/llm/chat" `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body $body
+```
