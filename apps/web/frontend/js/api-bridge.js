@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
   const UI_TO_API_COL = {
     backlog: 'backlog',
     todo: 'todo',
@@ -52,7 +52,7 @@
     { id: 'security', label: 'Безопасность' },
   ];
 
-  let authToken = localStorage.getItem('pk_token') || '';
+  let authToken = localStorage.getItem('pk24_token') || '';
   let authPromise = null;
   let headerRefreshScheduled = false;
   let headerRefreshInFlight = false;
@@ -114,6 +114,22 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  function decodeJwtPayload(token) {
+    try {
+      const parts = String(token || '').split('.');
+      if (parts.length !== 3) { return null; }
+      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const json = decodeURIComponent(
+        atob(base64).split('').map(function (c) {
+          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join('')
+      );
+      return JSON.parse(json);
+    } catch (_) {
+      return null;
+    }
   }
 
   function formatDateTime(value) {
@@ -319,19 +335,49 @@
 
   function renderProfileOverview() {
     const content = document.getElementById('profile-content');
-    if (!content) {
-      return;
-    }
-    const accountEmail = localStorage.getItem('pk_email') || 'admin@local.dev';
-    const projectName = getProjectName(activeProjId) || 'Без проекта';
+    if (!content) { return; }
+
+    const jwt = decodeJwtPayload(localStorage.getItem('pk24_token'));
+    const userEmail  = (jwt && jwt.email)  || '—';
+    const userRole   = (jwt && jwt.role)   || '—';
+    const userId     = (jwt && jwt.sub)    || '—';
+    const tokenExp   = jwt && jwt.exp ? new Date(jwt.exp * 1000) : null;
+    const tokenExpStr = tokenExp
+      ? new Intl.DateTimeFormat('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }).format(tokenExp)
+      : '—';
+    const nowMs = Date.now();
+    const expMs = tokenExp ? tokenExp.getTime() : 0;
+    const hoursLeft = expMs > nowMs ? Math.floor((expMs - nowMs) / 3600000) : 0;
+
+    const roleLabels = { admin: 'Администратор', techlead: 'Техлид', employee: 'Сотрудник' };
+    const roleLabel  = roleLabels[userRole] || userRole;
+    const roleColors = { admin: 'var(--red)', techlead: 'var(--gold)', employee: 'var(--green)' };
+    const roleColor  = roleColors[userRole] || 'var(--tx3)';
+
+    const projectName = getProjectName(activeProjId) || 'Не выбран';
+
     content.innerHTML = ''
       + '<div class="profile-pane">'
       + '<div class="profile-pane-title">Профиль</div>'
-      + '<div class="profile-pane-sub">Быстрый обзор пользователя и активного проекта.</div>'
+      + '<div class="profile-pane-sub">Данные текущей сессии и состояние активного проекта.</div>'
       + '<div class="profile-cards">'
+      + '<div class="profile-card" style="grid-column:1/-1">'
+      + '<div class="profile-card-label">Email</div>'
+      + '<div class="profile-card-value">' + escapeHtml(userEmail) + '</div>'
+      + '</div>'
       + '<div class="profile-card">'
-      + '<div class="profile-card-label">Аккаунт</div>'
-      + '<div class="profile-card-value">' + escapeHtml(accountEmail) + '</div>'
+      + '<div class="profile-card-label">Роль</div>'
+      + '<div class="profile-card-value" style="color:' + roleColor + '">' + escapeHtml(roleLabel) + '</div>'
+      + '</div>'
+      + '<div class="profile-card">'
+      + '<div class="profile-card-label">ID пользователя</div>'
+      + '<div class="profile-card-value" style="font-size:11px;word-break:break-all">' + escapeHtml(userId) + '</div>'
+      + '</div>'
+      + '<div class="profile-card">'
+      + '<div class="profile-card-label">Токен истекает</div>'
+      + '<div class="profile-card-value" style="font-size:12px">' + escapeHtml(tokenExpStr) + '</div>'
+      + '<div class="profile-card-sub" style="color:' + (hoursLeft < 2 ? 'var(--red)' : 'var(--tx3)') + '">'
+      + escapeHtml(hoursLeft > 0 ? 'через ' + hoursLeft + ' ч.' : 'истёк') + '</div>'
       + '</div>'
       + '<div class="profile-card">'
       + '<div class="profile-card-label">Активный проект</div>'
@@ -342,29 +388,100 @@
       + '<div class="profile-card-value">' + String(projects.length) + '</div>'
       + '</div>'
       + '</div>'
+      + '<div id="profile-overview-stats" style="margin-top:12px">'
+      + '<div class="profile-empty">Загрузка статистики...</div>'
+      + '</div>'
       + '</div>';
+
+    // Async: подгружаем реальный светофор и бюджет
+    (async function () {
+      const statsEl = document.getElementById('profile-overview-stats');
+      if (!statsEl) { return; }
+      try {
+        const [tasks, budget] = await Promise.all([
+          apiFetch('/stats/tasks'),
+          apiFetch('/stats/budget'),
+        ]);
+        const inWork   = (tasks.in_work  || 0);
+        const done     = (tasks.done     || 0);
+        const backlog  = (tasks.backlog  || 0);
+        const total    = backlog + inWork + done;
+        const earned   = Number(budget.earned  || 0);
+        const budTotal = Number(budget.total   || 0);
+        const progress = Number(budget.progress || 0);
+        const fmt = function (n) { return n.toLocaleString('ru-RU'); };
+        statsEl.innerHTML = ''
+          + '<div class="profile-cards">'
+          + '<div class="profile-card">'
+          + '<div class="profile-card-label">Задач всего</div>'
+          + '<div class="profile-card-value">' + total + '</div>'
+          + '</div>'
+          + '<div class="profile-card">'
+          + '<div class="profile-card-label">В работе</div>'
+          + '<div class="profile-card-value" style="color:var(--yellow)">' + inWork + '</div>'
+          + '</div>'
+          + '<div class="profile-card">'
+          + '<div class="profile-card-label">Выполнено</div>'
+          + '<div class="profile-card-value" style="color:var(--green)">' + done + '</div>'
+          + '</div>'
+          + '<div class="profile-card">'
+          + '<div class="profile-card-label">Backlog</div>'
+          + '<div class="profile-card-value" style="color:var(--red)">' + backlog + '</div>'
+          + '</div>'
+          + '<div class="profile-card" style="grid-column:1/-1">'
+          + '<div class="profile-card-label">Бюджет: заработано / всего</div>'
+          + '<div class="profile-card-value">'
+          + fmt(earned) + ' ₽ <span style="color:var(--tx3);font-size:12px">/ ' + fmt(budTotal) + ' ₽</span>'
+          + '</div>'
+          + '<div style="margin-top:8px;height:6px;border-radius:99px;background:var(--sf2);border:1px solid var(--bd2);overflow:hidden">'
+          + '<div style="height:100%;width:' + Math.min(100, Math.round(progress * 100)) + '%;background:linear-gradient(90deg,var(--green),var(--gold));transition:width .3s"></div>'
+          + '</div>'
+          + '</div>'
+          + '</div>';
+      } catch (_) {
+        if (statsEl) { statsEl.innerHTML = ''; }
+      }
+    })();
   }
 
   function renderProfileRoles() {
     const content = document.getElementById('profile-content');
-    if (!content) {
-      return;
-    }
-    const rows = projects
-      .map(function (project) {
-        return ''
-          + '<div class="profile-role-row">'
-          + '<div class="profile-role-name">' + escapeHtml(project.name) + '</div>'
-          + '<div class="profile-role-meta">Роль: admin</div>'
-          + '</div>';
-      })
-      .join('');
+    if (!content) { return; }
+
+    const jwt = decodeJwtPayload(localStorage.getItem('pk24_token'));
+    const userRole  = (jwt && jwt.role)  || 'employee';
+    const userId    = (jwt && jwt.sub)   || '';
+    const roleLabels = { admin: 'Администратор', techlead: 'Техлид', employee: 'Сотрудник' };
+    const roleLabel  = roleLabels[userRole] || userRole;
+    const roleColors = { admin: 'var(--red)', techlead: 'var(--gold)', employee: 'var(--green)' };
+    const roleColor  = roleColors[userRole] || 'var(--tx3)';
+
+    const rows = projects.map(function (project) {
+      const isActive = project.id === activeProjId;
+      const stageCount = Array.isArray(project.stages) ? project.stages.length : 0;
+      const budget = Number(project.budget_total || 0);
+      const budgetStr = budget > 0 ? budget.toLocaleString('ru-RU') + ' ₽' : '—';
+      return ''
+        + '<div class="profile-role-row"' + (isActive ? ' style="border-color:var(--gold);background:var(--gold-dim)"' : '') + '>'
+        + '<div style="display:flex;align-items:center;gap:8px;min-width:0">'
+        + (isActive ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--gold);flex-shrink:0;box-shadow:0 0 6px var(--gold-glow)"></span>' : '<span style="width:6px;height:6px;border-radius:50%;background:var(--bd3);flex-shrink:0"></span>')
+        + '<div class="profile-role-name">' + escapeHtml(project.name) + (isActive ? ' <span style="font-size:9px;color:var(--gold);letter-spacing:1px">АКТИВНЫЙ</span>' : '') + '</div>'
+        + '</div>'
+        + '<div style="display:flex;gap:16px;align-items:center;font-size:11px;color:var(--tx3);flex-shrink:0">'
+        + '<span>' + stageCount + ' этапов</span>'
+        + '<span>' + budgetStr + '</span>'
+        + '<span style="color:' + roleColor + ';font-weight:600">' + escapeHtml(roleLabel) + '</span>'
+        + '</div>'
+        + '</div>';
+    }).join('');
 
     content.innerHTML = ''
       + '<div class="profile-pane">'
       + '<div class="profile-pane-title">Мои проекты и роли</div>'
-      + '<div class="profile-pane-sub">Скелет списка ролей по доступным проектам.</div>'
-      + '<div class="profile-role-list">' + (rows || '<div class="profile-empty">Нет проектов</div>') + '</div>'
+      + '<div class="profile-pane-sub">Роль в системе: <strong style="color:' + roleColor + '">' + escapeHtml(roleLabel) + '</strong> · ID: <span style="color:var(--tx3);font-size:11px">' + escapeHtml(userId) + '</span></div>'
+      + '<div class="profile-role-list">'
+      + (rows || '<div class="profile-empty">Нет доступных проектов</div>')
+      + '</div>'
       + '</div>';
   }
 
@@ -413,8 +530,9 @@
     if (logoutButton) {
       logoutButton.onclick = function () {
         authToken = '';
-        localStorage.removeItem('pk_token');
-        location.reload();
+        localStorage.removeItem('pk24_token');
+        localStorage.removeItem('pk24_email');
+        location.replace('/login.html');
       };
     }
   }
@@ -882,6 +1000,120 @@
     };
   }
 
+  function renderProfileHistory() {
+    const content = document.getElementById('profile-content');
+    if (!content) { return; }
+
+    const projectName = getProjectName(activeProjId) || '—';
+
+    content.innerHTML = ''
+      + '<div class="profile-pane">'
+      + '<div class="profile-pane-title">История действий</div>'
+      + '<div class="profile-pane-sub">Последние 100 событий активного проекта из audit trail (task_events).</div>'
+      + (activeProjId
+        ? '<div id="profile-history-list"><div class="profile-empty">Загрузка событий...</div></div>'
+        : '<div class="profile-empty">Выберите активный проект, чтобы увидеть историю.</div>')
+      + '</div>';
+
+    if (!activeProjId) { return; }
+
+    (async function () {
+      const listEl = document.getElementById('profile-history-list');
+      if (!listEl) { return; }
+      try {
+        const EVENT_LABELS = {
+          task_created:   '✦ Создана',
+          task_updated:   '✎ Обновлена',
+          task_moved:     '→ Перемещена',
+          task_reordered: '⇅ Переупорядочена',
+          task_deleted:   '✕ Удалена',
+          agent_action:   '⚡ Агент',
+        };
+        const EVENT_COLORS = {
+          task_created:   'var(--green)',
+          task_updated:   'var(--gold)',
+          task_moved:     'var(--c-A)',
+          task_reordered: 'var(--tx3)',
+          task_deleted:   'var(--red)',
+          agent_action:   'var(--c-R1)',
+        };
+        const data = await apiFetch('/projects/' + activeProjId + '/events?limit=100');
+        const events = Array.isArray(data && data.events) ? data.events : [];
+        if (!events.length) {
+          listEl.innerHTML = '<div class="profile-empty">Событий не найдено.</div>';
+          return;
+        }
+        const rows = events.map(function (ev) {
+          const label = EVENT_LABELS[ev.event_type] || escapeHtml(ev.event_type);
+          const color = EVENT_COLORS[ev.event_type] || 'var(--tx2)';
+          const taskId = ev.task_id ? String(ev.task_id).slice(0, 8) + '…' : '—';
+          let detail = '';
+          if (ev.payload) {
+            if (ev.payload.from_col && ev.payload.to_col) {
+              detail = escapeHtml(ev.payload.from_col) + ' → ' + escapeHtml(ev.payload.to_col);
+            } else if (ev.payload.title) {
+              detail = escapeHtml(ev.payload.title);
+            } else if (Array.isArray(ev.payload.fields_changed)) {
+              detail = ev.payload.fields_changed.map(escapeHtml).join(', ');
+            }
+          }
+          return ''
+            + '<div class="profile-role-row" style="gap:10px;align-items:flex-start">'
+            + '<div style="font-size:11px;color:' + color + ';font-weight:600;flex-shrink:0;min-width:110px">' + label + '</div>'
+            + '<div style="font-size:11px;color:var(--tx3);flex-shrink:0;min-width:70px;font-family:\'DM Mono\',monospace">' + escapeHtml(taskId) + '</div>'
+            + '<div style="font-size:11px;color:var(--tx2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (detail || '—') + '</div>'
+            + '<div style="font-size:10px;color:var(--tx4);flex-shrink:0;white-space:nowrap">' + escapeHtml(formatDateTime(ev.created_at)) + '</div>'
+            + '</div>';
+        }).join('');
+        listEl.innerHTML = '<div class="profile-role-list">' + rows + '</div>';
+      } catch (err) {
+        if (listEl) { listEl.innerHTML = '<div class="profile-empty">Ошибка загрузки: ' + escapeHtml(err.message) + '</div>'; }
+      }
+    })();
+  }
+
+  function renderProfileLlm() {
+    const content = document.getElementById('profile-content');
+    if (!content) { return; }
+
+    content.innerHTML = ''
+      + '<div class="profile-pane">'
+      + '<div class="profile-pane-title">Импорт и LLM-операции</div>'
+      + '<div class="profile-pane-sub">Точки входа LLM Gateway. Для использования требуется настроенный провайдер.</div>'
+      + '<div class="profile-cards">'
+      + '<div class="profile-card" style="grid-column:1/-1">'
+      + '<div class="profile-card-label">POST /import/excel</div>'
+      + '<div class="profile-card-value" style="font-size:12px">Импорт задач из файла через LLM-парсинг</div>'
+      + '<div class="profile-card-sub">Принимает file_name + content → создаёт backlog-задачи</div>'
+      + '</div>'
+      + '<div class="profile-card" style="grid-column:1/-1">'
+      + '<div class="profile-card-label">POST /llm/task-dialog</div>'
+      + '<div class="profile-card-value" style="font-size:12px">Диалоговая постановка задачи через LLM</div>'
+      + '<div class="profile-card-sub">messages[] → title, descript, stage, priority</div>'
+      + '</div>'
+      + '<div class="profile-card" style="grid-column:1/-1">'
+      + '<div class="profile-card-label">POST /api/llm/chat</div>'
+      + '<div class="profile-card-value" style="font-size:12px">Прямой запрос к LLM Gateway</div>'
+      + '<div class="profile-card-sub" id="profile-llm-provider">Загрузка доступных моделей...</div>'
+      + '</div>'
+      + '</div>'
+      + '</div>';
+
+    (async function () {
+      const el = document.getElementById('profile-llm-provider');
+      if (!el) { return; }
+      try {
+        const data = await apiFetch('/api/llm/models?provider=anthropic');
+        const models = Array.isArray(data && data.models) ? data.models : [];
+        el.textContent = models.length
+          ? 'Провайдер: ' + (data.provider || 'anthropic') + ' · Модели: ' + models.join(', ')
+          : 'Провайдер не настроен (LLM_STUB_MODE или ключ отсутствует)';
+      } catch (_) {
+        el.textContent = 'LLM Gateway недоступен';
+      }
+    })();
+  }
+
   function renderProfileSection() {
     if (activeProfileSection === 'profile') {
       renderProfileOverview();
@@ -893,7 +1125,7 @@
       return;
     }
     if (activeProfileSection === 'history') {
-      renderProfilePlaceholder('История действий', 'Скелет журнала действий пользователя и проекта.');
+      renderProfileHistory();
       return;
     }
     if (activeProfileSection === 'roles') {
@@ -901,7 +1133,7 @@
       return;
     }
     if (activeProfileSection === 'llm') {
-      renderProfilePlaceholder('Импорт и LLM-операции', 'Скелет раздела статистики импортов и LLM-запросов.');
+      renderProfileLlm();
       return;
     }
     if (
@@ -1970,40 +2202,17 @@
       return authToken;
     }
 
-    if (authPromise) {
-      return authPromise;
-    }
-
-    authPromise = (async function () {
-      const email = localStorage.getItem('pk_email') || 'admin@local.dev';
-      const password = localStorage.getItem('pk_password') || 'admin123';
-
-      const response = await fetch('/auth/login', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ email: email, password: password }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Auth failed: ' + response.status);
-      }
-
-      const data = await response.json();
-      authToken = data.token || '';
-      if (!authToken) {
-        throw new Error('Auth token is missing');
-      }
-      localStorage.setItem('pk_token', authToken);
+    const stored = localStorage.getItem('pk24_token');
+    if (stored) {
+      authToken = stored;
       return authToken;
-    })();
-
-    try {
-      return await authPromise;
-    } finally {
-      authPromise = null;
     }
+
+    // Нет токена — редиректим на страницу входа
+    location.replace('/login.html');
+    // Возвращаем промис, который никогда не резолвится,
+    // чтобы остановить дальнейшее выполнение до редиректа
+    return new Promise(function () {});
   }
 
   async function apiFetch(path, options) {
@@ -2028,7 +2237,10 @@
 
     if (response.status === 401) {
       authToken = '';
-      localStorage.removeItem('pk_token');
+      localStorage.removeItem('pk24_token');
+      localStorage.removeItem('pk24_email');
+      location.replace('/login.html');
+      return new Promise(function () {});
     }
 
     if (!response.ok) {
@@ -2428,6 +2640,7 @@
       + '.profile-card{padding:12px;border-radius:12px;background:var(--sf);border:1px solid var(--bd2);}'
       + '.profile-card-label{font-size:10px;color:var(--tx3);text-transform:uppercase;letter-spacing:1px;}'
       + '.profile-card-value{margin-top:8px;font-size:13px;color:var(--tx);font-family:Syne,sans-serif;font-weight:700;}'
+      + '.profile-card-sub{margin-top:4px;font-size:11px;color:var(--tx3);}'
       + '.profile-role-list{display:flex;flex-direction:column;gap:8px;}'
       + '.profile-role-row{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--sf);border:1px solid var(--bd2);border-radius:10px;}'
       + '.profile-role-name{font-size:13px;color:var(--tx);font-family:Syne,sans-serif;}'

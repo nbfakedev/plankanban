@@ -744,6 +744,12 @@ select option:disabled, .status-sel option:disabled{
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
+// ── AUTH GUARD ──
+(function () {
+  if (!localStorage.getItem('pk24_token')) {
+    location.replace('/login.html');
+  }
+})();
 // ============================================
 // CONSTANTS
 // ============================================
