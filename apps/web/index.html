@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>mossb.ru — Project Board</title>
+<title>PlanKanban24 - Project Board</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -12,20 +12,24 @@
   --green:#4ade80;--yellow:#fbbf24;--red:#f87171;
 }
 [data-theme="dark"]{
+  color-scheme:dark;
   --bg:#080b12;--bg2:#0e1420;
   --sf:rgba(255,255,255,.04);--sf2:rgba(255,255,255,.07);--sf3:rgba(255,255,255,.12);
   --bd:rgba(255,255,255,.08);--bd2:rgba(255,255,255,.14);--bd3:rgba(255,255,255,.22);
   --tx:#f0ede8;--tx2:#8a97b0;--tx3:#424d62;--tx4:#2a3347;
   --sh:0 4px 24px rgba(0,0,0,.5);--sh-lg:0 20px 70px rgba(0,0,0,.75);
   --hbg:rgba(8,11,18,.93);--mbg:rgba(10,14,22,.97);--scr:rgba(255,255,255,.08);
+  --dd-bg:#131b2a;--dd-bg2:#101723;--dd-tx:#eaf0ff;--dd-muted:#9aa8c6;--dd-active:#1f66cf;
 }
 [data-theme="light"]{
+  color-scheme:light;
   --bg:#eef0f7;--bg2:#e4e7f2;
   --sf:rgba(255,255,255,.82);--sf2:rgba(255,255,255,.96);--sf3:#fff;
   --bd:rgba(0,0,0,.09);--bd2:rgba(0,0,0,.15);--bd3:rgba(0,0,0,.23);
   --tx:#1a1f2e;--tx2:#4a556a;--tx3:#8a97b0;--tx4:#b0bdd0;
   --sh:0 4px 20px rgba(0,0,0,.08);--sh-lg:0 16px 48px rgba(0,0,0,.14);
   --hbg:rgba(238,240,247,.95);--mbg:rgba(244,246,252,.99);--scr:rgba(0,0,0,.12);
+  --dd-bg:#f8faff;--dd-bg2:#eef3ff;--dd-tx:#162035;--dd-muted:#4f5d77;--dd-active:#2c6edb;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--tx);font-family:'DM Mono',monospace;min-height:100vh;overflow:hidden;transition:background .3s,color .3s;}
@@ -34,7 +38,7 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-thumb{background:var(--scr);border-radius:3px;}
 
-/* ── HEADER ── */
+/* -- HEADER -- */
 header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:center;padding:0 18px;gap:10px;background:var(--hbg);backdrop-filter:blur(20px) saturate(1.4);border-bottom:1px solid var(--bd);transition:background .3s;}
 
 .logo{display:flex;align-items:center;gap:8px;flex-shrink:0;text-decoration:none;margin-top:5px;}
@@ -74,7 +78,7 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 .b-bar-wrap{width:44px;height:3px;background:var(--bd2);border-radius:2px;overflow:hidden;}
 .b-bar-fill{height:100%;background:var(--gold);border-radius:2px;transition:width .5s ease;box-shadow:0 0 5px var(--gold-glow);}
 
-/* ── UNIFIED TIMER CHIP ── */
+/* -- UNIFIED TIMER CHIP -- */
 .timer-chip{display:flex;align-items:center;height:42px;background:var(--sf);border:1px solid var(--bd);border-radius:10px;overflow:hidden;flex-shrink:0;white-space:nowrap;padding:0 2px;}
 .tc-block{display:flex;align-items:baseline;gap:3px;padding:0 8px;border-right:1px solid var(--bd);}
 .tc-block:last-child{border-right:none;}
@@ -105,8 +109,21 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 .btn-add:hover{background:var(--gold2);transform:translateY(-1px);box-shadow:0 5px 18px rgba(240,165,0,.5);}
 .btn-projects{display:flex;align-items:center;gap:5px;padding:0 18px;height:42px;background:linear-gradient(135deg,#2563eb,#0ea5e9);border:none;border-radius:9px;color:#fff;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;box-shadow:0 3px 12px rgba(14,165,233,.4);white-space:nowrap;flex-shrink:0;}
 .btn-projects:hover{background:linear-gradient(135deg,#3b82f6,#38bdf8);transform:translateY(-1px);box-shadow:0 5px 20px rgba(14,165,233,.6);}
-
-/* ── PROJECTS DROPDOWN ── */
+.btn-profile{
+  width:42px;height:42px;border-radius:10px;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  background:var(--sf);border:1px solid var(--bd2);color:var(--tx2);
+  cursor:pointer;transition:all .2s;
+}
+.btn-profile:hover{
+  background:var(--sf2);border-color:var(--bd3);color:var(--tx);
+  transform:translateY(-1px);box-shadow:0 5px 16px rgba(14,165,233,.22);
+}
+.btn-profile svg{
+  width:18px;height:18px;stroke:currentColor;fill:none;
+  stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;
+}
+/* -- PROJECTS DROPDOWN -- */
 .proj-wrap{position:relative;flex-shrink:0;}
 .proj-dropdown{
   position:absolute;top:calc(100% + 10px);right:0;left:auto;
@@ -217,9 +234,9 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 .proj-dd-gear:hover{color:var(--gold);background:var(--gold-dim);}
 .proj-dd-gear svg,.proj-dd-gear *{display:block;margin:auto;}
 
-/* ── PROJECT SETTINGS MODAL ── */
+/* -- PROJECT SETTINGS MODAL -- */
 .proj-settings-modal{
-  width:460px;max-width:95vw;
+  width:640px;max-width:95vw;
   background:var(--mbg);
   border:1px solid var(--bd2);
   border-radius:20px;
@@ -258,6 +275,24 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 }
 .ps-input:focus{border-color:var(--gold);background:var(--sf3);}
 .ps-input-group{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+
+/* Unified themed dropdowns for all form selects */
+select, .status-sel{color:var(--tx);}
+select option, .status-sel option{
+  background:var(--dd-bg);
+  color:var(--dd-tx);
+}
+select optgroup, .status-sel optgroup{
+  background:var(--dd-bg2);
+  color:var(--dd-muted);
+}
+select option:checked, .status-sel option:checked{
+  background:var(--dd-active);
+  color:#fff;
+}
+select option:disabled, .status-sel option:disabled{
+  color:var(--dd-muted);
+}
 
 .ps-budget-wrap{position:relative;}
 .ps-budget-prefix{
@@ -312,7 +347,7 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 .progress{height:2px;background:var(--bd);z-index:99;position:relative;}
 .progress-fill{height:100%;background:linear-gradient(90deg,var(--gold),var(--gold2));box-shadow:0 0 8px var(--gold-glow);transition:width .6s ease;}
 
-/* ── STAGE BAR ── */
+/* -- STAGE BAR -- */
 .stage-bar{display:flex;align-items:center;gap:6px;padding:0 18px;height:64px;background:var(--hbg);backdrop-filter:blur(12px);border-bottom:1px solid var(--bd);overflow-x:auto;overflow-y:hidden;position:sticky;top:64px;z-index:98;transition:background .3s;}
 .stage-bar::-webkit-scrollbar{height:0;width:0;}
 .stab{display:flex;align-items:center;gap:6px;padding:0 13px;height:42px;border-radius:9px;border:1.5px solid var(--bd);background:var(--sf);color:var(--tx2);font-family:'DM Mono',monospace;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap;transition:all .18s;flex-shrink:0;}
@@ -326,11 +361,11 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 [data-theme="light"] .stab.active .cnt{background:rgba(0,0,0,.15);}
 [data-theme="light"] .stab[data-stage="all"].active .cnt{background:rgba(0,0,0,.12);}
 
-/* ── BOARD ── */
+/* -- BOARD -- */
 .board-outer{position:relative;z-index:10;height:calc(100vh - 138px);overflow:hidden;}
 .board{display:flex;gap:10px;height:100%;padding:14px 14px 0;overflow-x:hidden;overflow-y:hidden;}
 
-/* ── COLUMN ── */
+/* -- COLUMN -- */
 .col{flex:1 1 0;min-width:220px;display:flex;flex-direction:column;background:var(--sf);border:1px solid var(--bd);border-radius:14px;overflow:hidden;transition:box-shadow .15s,border-color .15s;}
 .col-head{display:flex;align-items:center;justify-content:space-between;padding:11px 13px 9px;border-bottom:1px solid var(--bd);flex-shrink:0;}
 .col-label{font-family:'Syne',sans-serif;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--tx3);}
@@ -341,10 +376,10 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 .col-add-btn:hover{border-color:var(--gold);color:var(--gold);background:var(--gold-dim);}
 .col-empty{padding:16px 10px;text-align:center;color:var(--tx4);font-size:11px;line-height:1.8;border:1.5px dashed var(--bd);border-radius:8px;}
 
-/* ── CARD ── */
-.card{background:var(--sf2);border:1px solid var(--bd);border-radius:11px;padding:11px 12px 11px 14px;cursor:grab;transition:all .2s cubic-bezier(.4,0,.2,1);position:relative;display:flex;flex-direction:column;gap:7px;}
+/* -- CARD -- */
+.card{background:var(--sf2);border:1px solid var(--bd);border-radius:11px;padding:11px 12px 11px 14px;cursor:grab;transition:all .2s cubic-bezier(.4,0,.2,1);position:relative;display:flex;flex-direction:column;gap:7px;overflow:hidden;}
 .card:hover{background:var(--sf3);border-color:var(--bd2);transform:translateY(-2px);box-shadow:var(--sh);}
-.card-strip{position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:11px 0 0 11px;}
+.card-strip{position:absolute;left:1px;top:1px;bottom:1px;width:3px;border-radius:8px;}
 /* ROW 1: id + size */
 .card-r1{display:flex;align-items:center;justify-content:space-between;gap:6px;}
 .card-id{font-size:10px;color:var(--tx3);font-weight:500;letter-spacing:.3px;}
@@ -357,11 +392,11 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 .track-lbl{font-size:10px;color:var(--tx3);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
 .hours-lbl{font-size:10px;color:var(--tx4);white-space:nowrap;margin-left:auto;flex-shrink:0;}
 
-/* ── OVERLAYS ── */
+/* -- OVERLAYS -- */
 .overlay{position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.65);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s ease;}
 .overlay.open{opacity:1;pointer-events:all;}
 
-/* ── TASK MODAL ── */
+/* -- TASK MODAL -- */
 .task-modal{width:800px;max-width:95vw;max-height:90vh;background:var(--mbg);border:1px solid var(--bd2);border-radius:20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:var(--sh-lg);transform:translateY(14px) scale(.97);transition:transform .25s cubic-bezier(.34,1.3,.64,1),background .3s;}
 .overlay.open .task-modal{transform:translateY(0) scale(1);}
 .tm-hd{display:flex;align-items:flex-start;gap:13px;padding:20px 22px 16px;border-bottom:1px solid var(--bd);flex-shrink:0;}
@@ -378,13 +413,11 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 .mc-val{font-size:13px;font-weight:500;color:var(--tx);}
 .mc-full{grid-column:1/-1;}
 .status-sel{width:100%;background:transparent;border:none;color:var(--tx);font-family:'DM Mono',monospace;font-size:13px;font-weight:500;cursor:pointer;outline:none;-webkit-appearance:none;}
-.status-sel option{background:#1a1f2e;}
-[data-theme="light"] .status-sel option{background:#e8ebf4;color:#1a1f2e;}
 .sec-h{display:flex;align-items:center;gap:8px;font-family:'Syne',sans-serif;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--tx3);margin-bottom:8px;}
 .sec-h::after{content:'';flex:1;height:1px;background:var(--bd);}
 .tm-desc{font-size:13px;line-height:1.8;color:var(--tx2);}
 
-/* ── AI BOXES (shared) ── */
+/* -- AI BOXES (shared) -- */
 .ai-box{border:1px solid var(--bd);border-radius:13px;overflow:hidden;background:var(--sf);}
 .ai-hd{display:flex;align-items:center;gap:9px;padding:10px 14px;border-bottom:1px solid var(--bd);background:linear-gradient(90deg,rgba(240,165,0,.07),transparent);}
 .ai-orb{width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,var(--gold),#e06b00);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#000;flex-shrink:0;box-shadow:0 0 12px rgba(240,165,0,.4);}
@@ -411,7 +444,7 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 .ai-send:hover{background:var(--gold2);}
 .ai-send:disabled{opacity:.4;cursor:not-allowed;}
 
-/* ── NEW TASK MODAL ── */
+/* -- NEW TASK MODAL -- */
 .nt-modal{width:660px;max-width:95vw;max-height:95vh;background:var(--mbg);border:1px solid var(--bd2);border-radius:20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:var(--sh-lg);transform:translateY(14px) scale(.97);transition:transform .25s cubic-bezier(.34,1.3,.64,1),background .3s;}
 .overlay.open .nt-modal{transform:translateY(0) scale(1);}
 
@@ -447,9 +480,21 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 .nt-send:disabled{opacity:.4;cursor:not-allowed;}
 
 
-/* ── IMPORT MODAL ── */
-.btn-import{display:flex;align-items:center;gap:5px;padding:0 16px;height:42px;background:var(--sf);border:1.5px solid var(--bd2);border-radius:9px;color:var(--tx2);font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;white-space:nowrap;flex-shrink:0;}
-.btn-import:hover{background:var(--sf2);border-color:var(--bd2);color:var(--tx);transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,.2);}
+/* -- IMPORT MODAL -- */
+.btn-import{
+  width:42px;height:42px;border-radius:9px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(74,222,128,.16);border:1.5px solid rgba(74,222,128,.45);
+  color:var(--green);cursor:pointer;transition:all .2s;
+}
+.btn-import:hover{
+  background:rgba(74,222,128,.28);border-color:var(--green);
+  transform:translateY(-1px);box-shadow:0 4px 16px rgba(74,222,128,.32);
+}
+.btn-import svg{
+  width:18px;height:18px;stroke:currentColor;fill:none;
+  stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;
+}
 
 .import-modal{width:600px;max-width:96vw;background:var(--mbg);border:1px solid var(--bd2);border-radius:20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.6);transform:translateY(14px) scale(.97);transition:transform .25s cubic-bezier(.34,1.3,.64,1),background .3s;max-height:90vh;}
 .overlay.open .import-modal{transform:translateY(0) scale(1);}
@@ -481,7 +526,7 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 .imp-task-title{flex:1;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .imp-task-meta{color:var(--tx3);flex-shrink:0;font-size:10px;}
 
-/* ── DRAG & DROP ── */
+/* -- DRAG & DROP -- */
 .card{cursor:grab;}
 .card:active{cursor:grabbing;}
 .card.dragging{
@@ -527,7 +572,7 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
   <div class="proj-title-wrap">
     <div class="proj-title-sep"></div>
     <div class="proj-title-dot"></div>
-    <div class="proj-title-text" id="proj-title-label">mossb.ru — B2B платформа</div>
+    <div class="proj-title-text" id="proj-title-label">Без проекта</div>
   </div>
 
   <div class="hright">
@@ -537,7 +582,7 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
       <span class="tl-sep">/</span>
       <div class="tl-item"><div class="tl-dot" style="background:var(--yellow);box-shadow:0 0 5px var(--yellow)"></div><span id="tl-wip" style="color:var(--yellow)">0</span></div>
       <span class="tl-sep">/</span>
-      <div class="tl-item"><div class="tl-dot" style="background:var(--red);box-shadow:0 0 5px var(--red)"></div><span id="tl-back" style="color:var(--red)">149</span></div>
+      <div class="tl-item"><div class="tl-dot" style="background:var(--red);box-shadow:0 0 5px var(--red)"></div><span id="tl-back" style="color:var(--red)">0</span></div>
     </div>
 
     <!-- Budget -->
@@ -583,10 +628,9 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 
     <button class="btn-timer" id="btn-timer" onclick="toggleTimer()">▶ Старт</button>
     <button class="theme-toggle" id="theme-btn" onclick="toggleTheme()">🌙</button>
-    <button class="btn-import" onclick="openImport()">📥 Импорт</button>
-    <button class="btn-add" onclick="openNewTask()">＋ Задача</button>
+    <button class="btn-add" onclick="openNewTask()">+ Задача</button>
 
-    <!-- Projects dropdown — rightmost -->
+    <!-- Projects dropdown -->
     <div class="proj-wrap" id="proj-wrap">
       <button class="btn-projects" onclick="toggleProjMenu(event)">⊞ Проекты</button>
       <div class="proj-dropdown" id="proj-dropdown">
@@ -600,6 +644,12 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
         <div id="proj-list"></div>
       </div>
     </div>
+    <button class="btn-profile" id="btn-profile" title="Профиль" aria-label="Профиль">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="8" r="4"></circle>
+        <path d="M4 20c0-3.5 3.6-6 8-6s8 2.5 8 6"></path>
+      </svg>
+    </button>
   </div>
 </header>
 
@@ -607,6 +657,20 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 
 <div class="stage-bar" id="stage-bar">
   <!-- Dynamic stage tabs rendered by renderStageTabs() -->
+  <button
+    class="btn-import"
+    onclick="openImport()"
+    title="Импортировать проект или задачи"
+    aria-label="Импортировать проект или задачи"
+  >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path>
+      <path d="M14 3v5h5"></path>
+      <path d="M9 17l6-6"></path>
+      <path d="M9 11h6"></path>
+      <path d="M12 17V11"></path>
+    </svg>
+  </button>
   <div class="stab-search-wrap">
     <span class="stab-search-icon">⌕</span>
     <input class="stab-search-input" id="search-input" placeholder="Поиск задач, ID, агента..." oninput="onSearch(this.value)">
@@ -634,7 +698,7 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
       <div>
         <div class="sec-h">AI-ассистент</div>
         <div class="ai-box">
-          <div class="ai-hd"><div class="ai-orb">✦</div><div><div class="ai-name">Claude</div><div class="ai-role">Tech Lead · mossb.ru</div></div></div>
+          <div class="ai-hd"><div class="ai-orb">✦</div><div><div class="ai-name">Claude</div><div class="ai-role">Tech Lead · PlanKanban</div></div></div>
           <div class="ai-msgs" id="ai-msgs"></div>
           <div class="ai-row">
             <textarea class="ai-ta" id="ai-in" placeholder="Декомпозиция, API, схема БД, промпт для Cursor..."
@@ -680,9 +744,9 @@ header{position:sticky;top:0;z-index:100;height:64px;display:flex;align-items:ce
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-// ════════════════════════════════════════════
+// ============================================
 // CONSTANTS
-// ════════════════════════════════════════════
+// ============================================
 const COLS=[{id:'backlog',label:'Backlog'},{id:'todo',label:'To Do'},{id:'inprogress',label:'In Progress'},{id:'review',label:'Review'},{id:'done',label:'Done'}];
 const STAGE_BUDGETS={A:790000,R1:1145000,'R1.1':745000,R2:1260000,'R2+':0,'R3+':635000,'R4+':0,F:525000};
 const TOTAL_BUDGET=5100000;
@@ -691,39 +755,39 @@ const SZC={XL:'#f87171',L:'#fb923c',M:'#fbbf24',S:'#4ade80'};
 const AGC={Claude:'#f0a500',Cursor:'#4a9eff',Codex:'#a78bfa','v0.dev':'#22d3ee','Николай':'#4ade80'};
 const STAB_C={'all':null,A:'#4a9eff',R1:'#a78bfa','R1.1':'#fb923c',R2:'#f87171','R3+':'#4ade80',F:'#22d3ee'};
 
-// ── DnD state (declared early so all functions can reference) ──
+// -- DnD state (declared early so all functions can reference) --
 let dragId=null, isDragging=false, dragSourceCol=null;
 
 const GREETINGS=['Привет! Что нужно сделать?','Здравствуйте! Какую задачу обсудим?','Привет, Николай. Что ставим сегодня?','Готов к работе. Опишите задачу.','Слушаю. Что нужно реализовать?'];
-const DEFAULT_TASKS = [{"id": "E0-01", "title": "Зафиксировать границы работ и состав релизов (Scope & Releases)", "stage": "A", "track": "PM/Scope", "deps": "", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: PM/Scope. Зависимости: нет.", "agent": "Николай"}, {"id": "E0-02", "title": "Матрица покрытия сценариев: Scenario → Feature → Screen/API", "stage": "A", "track": "PM/Scope", "deps": "E0-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: PM/Scope. Зависимости: E0-01.", "agent": "Николай"}, {"id": "E0-03", "title": "KPI/метрики продукта и схема событий аналитики", "stage": "A", "track": "PM/Analytics", "deps": "E0-01", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: PM/Analytics. Зависимости: E0-01.", "agent": "Николай"}, {"id": "E0-04", "title": "NFR-пороги (p95, error_rate, деградации) и методика замера", "stage": "A", "track": "NFR", "deps": "E0-01", "size": "M", "hours": 48, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: NFR. Зависимости: E0-01.", "agent": "Claude"}, {"id": "E0-05", "title": "Контуры данных/обмена: 1С/ERP, поставщики, EDI/ЭДО, CRM", "stage": "A", "track": "Integrations", "deps": "E0-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E0-01.", "agent": "Claude"}, {"id": "E0-06", "title": "Сущности интеграций и ключи идентификации (SKU/цены/остатки/сроки/заказы/доки)", "stage": "A", "track": "Integrations", "deps": "E0-05", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E0-05.", "agent": "Claude"}, {"id": "E0-07", "title": "Типы интеграций: API, пакетный импорт, EDI, webhooks, внешний API", "stage": "A", "track": "Integrations", "deps": "E0-05", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E0-05.", "agent": "Claude"}, {"id": "E0-08", "title": "Выбор стека и принципов хранения (PG/ES/Redis/S3/Queue) + ADR", "stage": "A", "track": "Architecture", "deps": "E0-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Architecture. Зависимости: E0-01.", "agent": "Claude"}, {"id": "E0-09", "title": "Разделение данных по хранилищам и правила источника правды", "stage": "A", "track": "Architecture", "deps": "E0-08", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Architecture. Зависимости: E0-08.", "agent": "Claude"}, {"id": "E0-10", "title": "Repo, ветвление, правила PR, линтеры/форматтеры", "stage": "A", "track": "Dev", "deps": "E0-08", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Dev. Зависимости: E0-08.", "agent": "Cursor"}, {"id": "E0-11", "title": "Окружения dev/stage/prod + базовый CI/CD", "stage": "A", "track": "DevOps", "deps": "E0-10", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: DevOps. Зависимости: E0-10.", "agent": "Cursor"}, {"id": "E0-12", "title": "Миграции БД с откатом, секреты, базовые бэкапы", "stage": "A", "track": "DevOps", "deps": "E0-11", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: DevOps. Зависимости: E0-11.", "agent": "Cursor"}, {"id": "E0-13", "title": "Наблюдаемость v0: request_id, метрики, логи, алерты (скелет)", "stage": "A", "track": "Observability", "deps": "E0-11", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Observability. Зависимости: E0-11.", "agent": "Cursor"}, {"id": "E0-14", "title": "План релизов и критерии приемки этапов", "stage": "A", "track": "PM/QA", "deps": "E0-01, E0-02", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: PM/QA. Зависимости: E0-01, E0-02.", "agent": "Николай"}, {"id": "E1-01", "title": "Визуальная стратегия B2B cockpit (плотность/скорость/табличность)", "stage": "A", "track": "Design", "deps": "", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Design. Зависимости: нет.", "agent": "v0.dev"}, {"id": "E1-02", "title": "Типографика (шкала, правила, моно для артикулов)", "stage": "A", "track": "Design", "deps": "E1-01", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Design. Зависимости: E1-01.", "agent": "v0.dev"}, {"id": "E1-03", "title": "Цветовая стратегия + семантика статусов (меньше красного)", "stage": "A", "track": "Design", "deps": "E1-01", "size": "S", "hours": 32, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Design. Зависимости: E1-01.", "agent": "v0.dev"}, {"id": "E1-04", "title": "Light/Dark темы на токенах", "stage": "A", "track": "Design", "deps": "E1-03", "size": "M", "hours": 48, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Design. Зависимости: E1-03.", "agent": "v0.dev"}, {"id": "E1-05", "title": "Требования к тяжёлым интерфейсам: таблицы/виртуализация/плотность", "stage": "A", "track": "Design", "deps": "E1-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Design. Зависимости: E1-01.", "agent": "v0.dev"}, {"id": "E1-06", "title": "UI-токены/variables (экспортопригодные)", "stage": "A", "track": "Design", "deps": "E1-02, E1-04", "size": "M", "hours": 48, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Design. Зависимости: E1-02, E1-04.", "agent": "v0.dev"}, {"id": "E1-07", "title": "Сетка/отступы/плотность (8pt/4pt)", "stage": "A", "track": "Design", "deps": "E1-06", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Design. Зависимости: E1-06.", "agent": "v0.dev"}, {"id": "E1-08", "title": "Компоненты UI-kit (кнопки/поля/селекты/автокомплит/маски/datepicker)", "stage": "A", "track": "Design", "deps": "E1-06", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Design. Зависимости: E1-06.", "agent": "v0.dev"}, {"id": "E1-09", "title": "Таблица: виртуализация/фикс колонки/сорт/ресайз/настройки/пагинация", "stage": "A", "track": "Design", "deps": "E1-05, E1-08", "size": "L", "hours": 140, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Design. Зависимости: E1-05, E1-08.", "agent": "v0.dev"}, {"id": "E1-10", "title": "Фильтры: панели/чипы/пресеты, мобайл-поведение", "stage": "A", "track": "Design", "deps": "E1-08", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Design. Зависимости: E1-08.", "agent": "v0.dev"}, {"id": "E1-11", "title": "Паттерны данных: empty/loading/error/нет доступа/нет сети, прогресс", "stage": "A", "track": "Design", "deps": "E1-08", "size": "M", "hours": 48, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Design. Зависимости: E1-08.", "agent": "v0.dev"}, {"id": "E1-12", "title": "Motion правила + prefers-reduced-motion", "stage": "A", "track": "Design", "deps": "E1-11", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Design. Зависимости: E1-11.", "agent": "v0.dev"}, {"id": "E1-13", "title": "Экраны и потоки R1 (auth, каталог, поиск, карточка, корзина, ЛК ЮЛ, BOM, системные состояния)", "stage": "A", "track": "Design", "deps": "E1-08, E1-11", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Design. Зависимости: E1-08, E1-11.", "agent": "v0.dev"}, {"id": "E1-14", "title": "Экраны этапа 2 (сравнение/списки/центр статусов/пресеты/возвраты)", "stage": "R1.1", "track": "Design", "deps": "E1-13", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Design. Зависимости: E1-13.", "agent": "v0.dev"}, {"id": "E1-15", "title": "Handoff пакет: спецификация поведения, токены, критерии UI приемки", "stage": "A", "track": "Design", "deps": "E1-13", "size": "M", "hours": 48, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Design. Зависимости: E1-13.", "agent": "v0.dev"}, {"id": "E2-01", "title": "Глобальные элементы: header/поиск/профиль/корзина + breadcrumbs", "stage": "R1", "track": "Frontend", "deps": "E0-11, E1-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E0-11, E1-13.", "agent": "Cursor"}, {"id": "E2-02", "title": "Главная: управляемые блоки из админки", "stage": "R1", "track": "Frontend", "deps": "E4-03, E0-11", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E4-03, E0-11.", "agent": "Cursor"}, {"id": "E2-03", "title": "Каталог: дерево категорий, листинг (плитка/таблица закупки)", "stage": "R1", "track": "Frontend", "deps": "E0-09, E1-13", "size": "L", "hours": 140, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Frontend. Зависимости: E0-09, E1-13.", "agent": "Cursor"}, {"id": "E2-04", "title": "Массовые действия в каталоге (add-many/qty/экспорт списка)", "stage": "R1", "track": "Frontend", "deps": "E2-03", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E2-03.", "agent": "Cursor"}, {"id": "E2-05", "title": "Правила видимости цен/условий по типу пользователя/роли", "stage": "R1", "track": "Backend", "deps": "E3-06, E4-07", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Backend. Зависимости: E3-06, E4-07.", "agent": "Claude"}, {"id": "E2-06", "title": "Фильтры (типы) и применение", "stage": "R1", "track": "Frontend", "deps": "E2-03, E1-10", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Frontend. Зависимости: E2-03, E1-10.", "agent": "Cursor"}, {"id": "E2-07", "title": "Сортировки (релевантность/цена/наличие/срок/популярность)", "stage": "R1", "track": "Frontend", "deps": "E2-03", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Frontend. Зависимости: E2-03.", "agent": "Cursor"}, {"id": "E2-08", "title": "Поиск ES: базовый контур + выдача", "stage": "R1", "track": "Search", "deps": "E7-01", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Search. Зависимости: E7-01.", "agent": "Claude"}, {"id": "E2-09", "title": "Поиск: опечатки/исправления", "stage": "R1.1", "track": "Search", "deps": "E2-08, E7-02", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Search. Зависимости: E2-08, E7-02.", "agent": "Claude"}, {"id": "E2-10", "title": "Поиск: синонимы/словари", "stage": "R1", "track": "Search", "deps": "E2-08", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Search. Зависимости: E2-08.", "agent": "Claude"}, {"id": "E2-11", "title": "Поиск: multi-SKU вставка списка артикулов", "stage": "R1.1", "track": "Search", "deps": "E2-08", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Search. Зависимости: E2-08.", "agent": "Claude"}, {"id": "E2-12", "title": "Поиск: умная выдача (товары + документы/категории)", "stage": "R1.1", "track": "Search", "deps": "E2-08, E2-15", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Search. Зависимости: E2-08, E2-15.", "agent": "Claude"}, {"id": "E2-13", "title": "Карточка товара: блок покупки (цена/наличие/срок/qty/добавить)", "stage": "R1", "track": "Frontend", "deps": "E2-03, E2-05", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Frontend. Зависимости: E2-03, E2-05.", "agent": "Cursor"}, {"id": "E2-14", "title": "Карточка: структурные характеристики + единицы", "stage": "R1", "track": "Frontend", "deps": "E2-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E2-13.", "agent": "Cursor"}, {"id": "E2-15", "title": "Карточка: документы товара (datasheet/сертификаты/инструкции)", "stage": "R1", "track": "Backend", "deps": "E0-09", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Backend. Зависимости: E0-09.", "agent": "Claude"}, {"id": "E2-16", "title": "Карточка: аналоги/замены (базово)", "stage": "R1.1", "track": "Backend", "deps": "E2-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Backend. Зависимости: E2-13.", "agent": "Claude"}, {"id": "E2-17", "title": "Производители: страница бренда (описание/подборки/SEO)", "stage": "R1.1", "track": "Frontend", "deps": "E2-03, E4-02", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E2-03, E4-02.", "agent": "Cursor"}, {"id": "E2-18", "title": "Производители: синонимы бренда", "stage": "R1.1", "track": "Search", "deps": "E2-10, E4-06", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Search. Зависимости: E2-10, E4-06.", "agent": "Claude"}, {"id": "E2-19", "title": "Акции/скидки: промо-страницы и условия", "stage": "R2", "track": "Backend", "deps": "E4-03, E4-07", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Backend. Зависимости: E4-03, E4-07.", "agent": "Claude"}, {"id": "E2-20", "title": "Избранное", "stage": "R2", "track": "Frontend", "deps": "E3-01", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Frontend. Зависимости: E3-01.", "agent": "Cursor"}, {"id": "E2-21", "title": "Списки закупок", "stage": "R1.1", "track": "Frontend", "deps": "E3-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E3-01.", "agent": "Cursor"}, {"id": "E2-22", "title": "Сравнение", "stage": "R2", "track": "Frontend", "deps": "E2-14", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E2-14.", "agent": "Cursor"}, {"id": "E2-23", "title": "Корзина: массовые операции и быстрый пересчет", "stage": "R1", "track": "Frontend", "deps": "E2-13", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Frontend. Зависимости: E2-13.", "agent": "Cursor"}, {"id": "E2-24", "title": "Оформление заказа/заявки (доставка/получатель/комментарии, B2B выбор орг)", "stage": "R1", "track": "Frontend", "deps": "E2-23, E3-05", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Frontend. Зависимости: E2-23, E3-05.", "agent": "Cursor"}, {"id": "E2-25", "title": "Сохранение контекста: гость (local), авториз (профиль)", "stage": "R1", "track": "Frontend", "deps": "E3-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E3-01.", "agent": "Cursor"}, {"id": "E2-26", "title": "Скорость витрины: SSR, скелетоны, lazy, кеширование", "stage": "R1", "track": "NFR", "deps": "E0-11, E0-13", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: NFR. Зависимости: E0-11, E0-13.", "agent": "Claude"}, {"id": "E3-01", "title": "Auth: вход/восстановление/смена пароля (ФЛ/ЮЛ)", "stage": "R1", "track": "Backend", "deps": "E0-11", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Backend. Зависимости: E0-11.", "agent": "Claude"}, {"id": "E3-02", "title": "Регистрация ЮЛ с модерацией и назначением условий", "stage": "R1", "track": "Backend", "deps": "E3-01", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Backend. Зависимости: E3-01.", "agent": "Claude"}, {"id": "E3-03", "title": "2FA для критичных ролей/операций", "stage": "R1.1", "track": "Security", "deps": "E3-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Security. Зависимости: E3-01.", "agent": "Claude"}, {"id": "E3-04", "title": "ЛК ФЛ: профиль/заказы/документы/обращения", "stage": "R2", "track": "Frontend", "deps": "E3-01, E3-09", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E3-01, E3-09.", "agent": "Cursor"}, {"id": "E3-05", "title": "ЛК ЮЛ: организация/реквизиты/сотрудники", "stage": "R1", "track": "Frontend", "deps": "E3-02", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E3-02.", "agent": "Cursor"}, {"id": "E3-06", "title": "RBAC ЮЛ (облегчённый в R1, полный в R1.1)", "stage": "R1", "track": "Security", "deps": "E3-05", "size": "L", "hours": 140, "notes": "В R1 — минимально для цен/доков; в R1.1 — полная матрица", "col": "backlog", "priority": "high", "desc": "Трек: Security. Зависимости: E3-05. В R1 — минимально для цен/доков; в R1.1 — полная матрица", "agent": "Claude"}, {"id": "E3-07", "title": "Лимиты/согласования/подтверждения критических действий", "stage": "R1.1", "track": "Security", "deps": "E3-06", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Security. Зависимости: E3-06.", "agent": "Claude"}, {"id": "E3-08", "title": "Управление сессиями (завершение, политики)", "stage": "R1.1", "track": "Security", "deps": "E3-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Security. Зависимости: E3-01.", "agent": "Claude"}, {"id": "E3-09", "title": "Заказы в ЛК: статусы + журнал событий", "stage": "R1", "track": "Backend", "deps": "E2-24", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Backend. Зависимости: E2-24.", "agent": "Claude"}, {"id": "E3-10", "title": "Документы: архив + массовая выгрузка", "stage": "R1", "track": "Backend", "deps": "E3-09, E2-15", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Backend. Зависимости: E3-09, E2-15.", "agent": "Claude"}, {"id": "E3-11", "title": "Частичные отгрузки: документы по партиям", "stage": "R2", "track": "Backend", "deps": "E3-10, E5-17", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Backend. Зависимости: E3-10, E5-17.", "agent": "Claude"}, {"id": "E3-12", "title": "ЭДО через EDI: статусы и документы end-to-end", "stage": "R2", "track": "Integrations", "deps": "E5-04", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Integrations. Зависимости: E5-04.", "agent": "Claude"}, {"id": "E3-13", "title": "Поиск в ЛК по заказам и документам", "stage": "R1.1", "track": "Search", "deps": "E3-09, E3-10", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Search. Зависимости: E3-09, E3-10.", "agent": "Claude"}, {"id": "E4-01", "title": "Админка контента: статьи/база знаний", "stage": "R1", "track": "Admin/CMS", "deps": "E0-11", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Admin/CMS. Зависимости: E0-11.", "agent": "Cursor"}, {"id": "E4-02", "title": "SEO-посадочные: шаблоны/метаданные/правила индексации", "stage": "R1.1", "track": "SEO", "deps": "E4-01", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: SEO. Зависимости: E4-01.", "agent": "Cursor"}, {"id": "E4-03", "title": "Управление блоками главной/промо", "stage": "R1", "track": "Admin/CMS", "deps": "E4-01", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Admin/CMS. Зависимости: E4-01.", "agent": "Cursor"}, {"id": "E4-04", "title": "Админка каталога: категории/атрибуты фильтров/единицы", "stage": "R1", "track": "Admin/Catalog", "deps": "E2-03", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Admin/Catalog. Зависимости: E2-03.", "agent": "Cursor"}, {"id": "E4-05", "title": "Админка карточек: характеристики/доки/медиа/аналоги/совместимость", "stage": "R1.1", "track": "Admin/Catalog", "deps": "E2-13", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Admin/Catalog. Зависимости: E2-13.", "agent": "Cursor"}, {"id": "E4-06", "title": "Админка брендов + синонимы", "stage": "R1", "track": "Admin/Catalog", "deps": "E4-04", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Admin/Catalog. Зависимости: E4-04.", "agent": "Cursor"}, {"id": "E4-07", "title": "Сегментация цен: правила по типу пользователя/организации", "stage": "R1", "track": "Pricing", "deps": "E3-06", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Pricing. Зависимости: E3-06.", "agent": "Claude"}, {"id": "E4-08", "title": "Источник цены + свежесть данных (timestamp/TTL)", "stage": "R1", "track": "Pricing", "deps": "E5-03", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Pricing. Зависимости: E5-03.", "agent": "Claude"}, {"id": "E4-09", "title": "Правило деградации: цена устарела → заявка", "stage": "R1.1", "track": "Pricing", "deps": "E4-08", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Pricing. Зависимости: E4-08.", "agent": "Claude"}, {"id": "E4-10", "title": "SEO-структура: SSR, чистые URL, sitemap/robots, canonical, фильтры", "stage": "R1", "track": "SEO", "deps": "E2-26", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: SEO. Зависимости: E2-26.", "agent": "Cursor"}, {"id": "E5-01", "title": "Подключение источников (поставщики/ERP) по API (цены/остатки/сроки/частично доки)", "stage": "R2", "track": "Integrations", "deps": "E0-06", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Integrations. Зависимости: E0-06.", "agent": "Claude"}, {"id": "E5-02", "title": "Пакетный импорт Excel/CSV как резервный канал + отчеты ошибок", "stage": "R1", "track": "Integrations", "deps": "E0-06", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Integrations. Зависимости: E0-06.", "agent": "Claude"}, {"id": "E5-03", "title": "Обновления по расписанию (цены/остатки/сроки)", "stage": "R1", "track": "Integrations", "deps": "E5-02", "size": "M", "hours": 80, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E5-02.", "agent": "Claude"}, {"id": "E5-04", "title": "EDI: обмен статусами и документами + подтверждения", "stage": "R2", "track": "EDI/EDO", "deps": "E0-07", "size": "XL+", "hours": 400, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: EDI/EDO. Зависимости: E0-07.", "agent": "Cursor"}, {"id": "E5-05", "title": "Webhooks: уведомления внешних систем о статусах/отгрузках", "stage": "R2", "track": "API", "deps": "E3-09", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: API. Зависимости: E3-09.", "agent": "Claude"}, {"id": "E5-06", "title": "Внешний API для клиентов (каталог/заказы/статусы/доки)", "stage": "R2", "track": "API", "deps": "E0-07", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: API. Зависимости: E0-07.", "agent": "Claude"}, {"id": "E5-07", "title": "Журнал обмена (что/когда/сколько обновили)", "stage": "R1", "track": "Integrations", "deps": "E5-02", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E5-02.", "agent": "Claude"}, {"id": "E5-08", "title": "Ретраи с backoff и лимитами", "stage": "R1", "track": "Integrations", "deps": "E5-03", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E5-03.", "agent": "Claude"}, {"id": "E5-09", "title": "Деградации интеграций (ограничения, объяснения, переход в заявку)", "stage": "R1.1", "track": "Integrations", "deps": "E4-08", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E4-08.", "agent": "Claude"}, {"id": "E5-10", "title": "Внутренняя обработка заказа: назначение менеджера, SLA, статусы", "stage": "R2", "track": "Ops/CRM", "deps": "E3-09", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Ops/CRM. Зависимости: E3-09.", "agent": "Claude"}, {"id": "E5-11", "title": "CRM-маршрутизация по правилам", "stage": "R2", "track": "Ops/CRM", "deps": "E5-10", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Ops/CRM. Зависимости: E5-10.", "agent": "Claude"}, {"id": "E5-12", "title": "Уведомления менеджеру (email/мессенджер/задача)", "stage": "R2", "track": "Ops/CRM", "deps": "E5-10", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Ops/CRM. Зависимости: E5-10.", "agent": "Claude"}, {"id": "E5-13", "title": "Коммуникации клиент↔менеджер внутри кабинета", "stage": "R2", "track": "Ops/CRM", "deps": "E5-10", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Ops/CRM. Зависимости: E5-10.", "agent": "Claude"}, {"id": "E5-14", "title": "Выставление счета и публикация в ЛК", "stage": "R2", "track": "Ops/CRM", "deps": "E5-10, E3-10", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Ops/CRM. Зависимости: E5-10, E3-10.", "agent": "Claude"}, {"id": "E5-15", "title": "Склад: резервирование остатков", "stage": "R2", "track": "Warehouse", "deps": "E5-03", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Warehouse. Зависимости: E5-03.", "agent": "Cursor"}, {"id": "E5-16", "title": "Склад: комплектация/упаковка", "stage": "R2", "track": "Warehouse", "deps": "E5-15", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Warehouse. Зависимости: E5-15.", "agent": "Cursor"}, {"id": "E5-17", "title": "Склад: отгрузка + печать документов + привязка к партии", "stage": "R2", "track": "Warehouse", "deps": "E5-16, E3-10", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Warehouse. Зависимости: E5-16, E3-10.", "agent": "Cursor"}, {"id": "E5-18", "title": "Склад: частичные отгрузки", "stage": "R2", "track": "Warehouse", "deps": "E5-17", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Warehouse. Зависимости: E5-17.", "agent": "Cursor"}, {"id": "E5-19", "title": "Склад: инвентаризация и корректировки", "stage": "R2", "track": "Warehouse", "deps": "E5-15", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Warehouse. Зависимости: E5-15.", "agent": "Cursor"}, {"id": "E5-20", "title": "Центр статусов интеграций/инцидентов (UX+админ)", "stage": "R1.1", "track": "Integrations", "deps": "E5-07, E5-08, E5-09, E0-13", "size": "M", "hours": 90, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Integrations. Зависимости: E5-07, E5-08, E5-09, E0-13.", "agent": "Claude"}, {"id": "E6-01", "title": "BOM: список спецификаций + импорт Excel/CSV/PDF", "stage": "R2", "track": "BOM", "deps": "E3-01", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: BOM. Зависимости: E3-01.", "agent": "Claude"}, {"id": "E6-02", "title": "BOM: матчинг строк со справочником", "stage": "R2", "track": "BOM", "deps": "E6-01, E7-01", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: BOM. Зависимости: E6-01, E7-01.", "agent": "Claude"}, {"id": "E6-03", "title": "BOM: валидации (единицы/дубли/параметры)", "stage": "R2", "track": "BOM", "deps": "E6-02", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: BOM. Зависимости: E6-02.", "agent": "Claude"}, {"id": "E6-04", "title": "BOM: аналоги/замены при дефиците", "stage": "R2", "track": "BOM", "deps": "E6-02, E2-16", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: BOM. Зависимости: E6-02, E2-16.", "agent": "Claude"}, {"id": "E6-05", "title": "BOM: экспорт КП/выгрузки", "stage": "R2", "track": "BOM", "deps": "E6-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: BOM. Зависимости: E6-01.", "agent": "Claude"}, {"id": "E6-06", "title": "Совместимость: правила несовместимости", "stage": "R2", "track": "Compatibility", "deps": "E4-05", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Compatibility. Зависимости: E4-05.", "agent": "Codex"}, {"id": "E6-07", "title": "Совместимость: проверка в корзине и BOM", "stage": "R2", "track": "Compatibility", "deps": "E6-06, E2-23, E6-01", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Compatibility. Зависимости: E6-06, E2-23, E6-01.", "agent": "Codex"}, {"id": "E6-08", "title": "Совместимость: рекомендации аксессуаров/компонентов", "stage": "R2", "track": "Compatibility", "deps": "E6-07", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Compatibility. Зависимости: E6-07.", "agent": "Codex"}, {"id": "E6-09", "title": "LLM: чат-консультации в карточке товара (только советы)", "stage": "R1", "track": "LLM", "deps": "E6-25, E6-27, E6-28, E6-29, E2-13, E2-15", "size": "M", "hours": 50, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: LLM. Зависимости: E6-25, E6-27, E6-28, E6-29, E2-13, E2-15.", "agent": "Claude"}, {"id": "E6-10", "title": "LLM: подбор по задаче (не в MVP)", "stage": "R2+", "track": "LLM", "deps": "E6-25, E2-08", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: LLM. Зависимости: E6-25, E2-08.", "agent": "Claude"}, {"id": "E6-11", "title": "LLM: команды по корзине/заказам (строго RBAC)", "stage": "R3+", "track": "LLM", "deps": "E6-26, E3-06, E7-10", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: LLM. Зависимости: E6-26, E3-06, E7-10.", "agent": "Claude"}, {"id": "E6-12", "title": "LLM: эскалация менеджеру/поддержке", "stage": "R2+", "track": "LLM", "deps": "E5-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: LLM. Зависимости: E5-13.", "agent": "Claude"}, {"id": "E6-13", "title": "Лояльность: витрина бонусов", "stage": "R3+", "track": "Loyalty", "deps": "E3-01", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Loyalty. Зависимости: E3-01.", "agent": "Cursor"}, {"id": "E6-14", "title": "Лояльность: применение бонусов на оформлении", "stage": "R3+", "track": "Loyalty", "deps": "E6-13, E2-24", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Loyalty. Зависимости: E6-13, E2-24.", "agent": "Cursor"}, {"id": "E6-15", "title": "Лояльность: ограничения (после оплаты, отмена при возврате)", "stage": "R3+", "track": "Loyalty", "deps": "E6-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Loyalty. Зависимости: E6-13.", "agent": "Cursor"}, {"id": "E6-16", "title": "Внутренний маркет: миссии/награды", "stage": "R3+", "track": "Marketing", "deps": "E6-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Marketing. Зависимости: E6-13.", "agent": "Cursor"}, {"id": "E6-17", "title": "Внутренний маркет: персональные предложения", "stage": "R4+", "track": "Marketing", "deps": "E6-16", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Marketing. Зависимости: E6-16.", "agent": "Cursor"}, {"id": "E6-18", "title": "Email-уведомления клиенту (статусы/доки/сервис)", "stage": "R1", "track": "Notifications", "deps": "E3-09", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Notifications. Зависимости: E3-09.", "agent": "Codex"}, {"id": "E6-19", "title": "SMS/мессенджеры (опционально)", "stage": "R2+", "track": "Notifications", "deps": "E6-18", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Notifications. Зависимости: E6-18.", "agent": "Codex"}, {"id": "E6-20", "title": "Управление согласиями и типами уведомлений", "stage": "R1.1", "track": "Notifications", "deps": "E6-18", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Notifications. Зависимости: E6-18.", "agent": "Codex"}, {"id": "E6-21", "title": "Новости/статический контент (справка/контакты)", "stage": "R1", "track": "Content", "deps": "E4-01", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: Content. Зависимости: E4-01.", "agent": "Cursor"}, {"id": "E6-22", "title": "Адаптивность ключевых сценариев", "stage": "R1", "track": "Frontend", "deps": "E1-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Frontend. Зависимости: E1-13.", "agent": "Cursor"}, {"id": "E6-23", "title": "PWA: установка + кеширование", "stage": "R2+", "track": "PWA", "deps": "E0-11", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: PWA. Зависимости: E0-11.", "agent": "Cursor"}, {"id": "E6-24", "title": "PWA: push уведомления", "stage": "R3+", "track": "PWA", "deps": "E6-20", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: PWA. Зависимости: E6-20.", "agent": "Cursor"}, {"id": "E6-25", "title": "[LLM] Источники знаний + RAG-контур (под карточку)", "stage": "R1", "track": "LLM", "deps": "E2-15, E7-01, E0-11", "size": "L", "hours": 140, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: LLM. Зависимости: E2-15, E7-01, E0-11.", "agent": "Claude"}, {"id": "E6-26", "title": "[LLM] Политики безопасности/ограничений (RBAC allowlist, подтверждения)", "stage": "R1.1", "track": "LLM", "deps": "E3-06, E7-10, E7-13", "size": "M", "hours": 120, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: LLM. Зависимости: E3-06, E7-10, E7-13.", "agent": "Claude"}, {"id": "E6-27", "title": "[LLM] Rate limit/квоты/контроль стоимости + кеш/таймауты", "stage": "R1", "track": "LLM", "deps": "E7-12, E0-13", "size": "M", "hours": 50, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: LLM. Зависимости: E7-12, E0-13.", "agent": "Claude"}, {"id": "E6-28", "title": "[LLM] Fallback/деградация при недоступности LLM", "stage": "R1", "track": "LLM", "deps": "E6-09", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: LLM. Зависимости: E6-09.", "agent": "Claude"}, {"id": "E6-29", "title": "[LLM] Телеметрия эффективности (помог/не помог, причины)", "stage": "R1", "track": "LLM", "deps": "E0-03, E0-13", "size": "M", "hours": 50, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: LLM. Зависимости: E0-03, E0-13.", "agent": "Claude"}, {"id": "E6-30", "title": "Файлы BOM: проверка типа/размера + AV-скан + безопасное хранение", "stage": "R2", "track": "Security", "deps": "E6-01, E0-11", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Security. Зависимости: E6-01, E0-11.", "agent": "Claude"}, {"id": "E7-01", "title": "Индексация ES: полная + инкрементальная", "stage": "R1", "track": "Search", "deps": "E0-08, E0-09", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Search. Зависимости: E0-08, E0-09.", "agent": "Claude"}, {"id": "E7-02", "title": "Управление словарями (синонимы/термины)", "stage": "R1.1", "track": "Search", "deps": "E7-01", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Search. Зависимости: E7-01.", "agent": "Claude"}, {"id": "E7-03", "title": "Redis-кеш подсказок/частых запросов", "stage": "R1.1", "track": "NFR", "deps": "E2-08", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: NFR. Зависимости: E2-08.", "agent": "Claude"}, {"id": "E7-04", "title": "Контроль качества выдачи (ключевые запросы, отчёт пустых)", "stage": "R1.1", "track": "Search", "deps": "E2-08", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Search. Зависимости: E2-08.", "agent": "Claude"}, {"id": "E7-05", "title": "Метрики p95/error_rate, нагрузка, очереди", "stage": "A", "track": "Observability", "deps": "E0-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Observability. Зависимости: E0-13.", "agent": "Cursor"}, {"id": "E7-06", "title": "Логи с request_id, корреляция", "stage": "A", "track": "Observability", "deps": "E0-13", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Observability. Зависимости: E0-13.", "agent": "Cursor"}, {"id": "E7-07", "title": "Трассировка (tracing)", "stage": "R2", "track": "Observability", "deps": "E0-13", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Observability. Зависимости: E0-13.", "agent": "Cursor"}, {"id": "E7-08", "title": "Алерты: NFR, сбои интеграций, очереди", "stage": "R1", "track": "Observability", "deps": "E7-05", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Observability. Зависимости: E7-05.", "agent": "Cursor"}, {"id": "E7-09", "title": "Аудит критичных изменений (права/цены/статусы/доки)", "stage": "R1.1", "track": "Security", "deps": "E3-06, E4-07", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Security. Зависимости: E3-06, E4-07.", "agent": "Claude"}, {"id": "E7-10", "title": "RBAC enforcement на заказы/доки/финансы", "stage": "R1", "track": "Security", "deps": "E3-06", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Security. Зависимости: E3-06.", "agent": "Claude"}, {"id": "E7-11", "title": "2FA enforcement на критичные операции", "stage": "R1.1", "track": "Security", "deps": "E3-03", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Security. Зависимости: E3-03.", "agent": "Claude"}, {"id": "E7-12", "title": "Rate limiting на API/витрину", "stage": "R1", "track": "Security", "deps": "E0-11", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Security. Зависимости: E0-11.", "agent": "Claude"}, {"id": "E7-13", "title": "OWASP базовые практики (валидации, XSS/CSRF, ревью)", "stage": "R1", "track": "Security", "deps": "E0-10", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: Security. Зависимости: E0-10.", "agent": "Claude"}, {"id": "E7-14", "title": "Secrets management + ротация", "stage": "A", "track": "Security", "deps": "E0-12", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: Security. Зависимости: E0-12.", "agent": "Claude"}, {"id": "E7-15", "title": "Масштабирование ES до 5 млн SKU (шарды/ресурсы)", "stage": "R2", "track": "NFR", "deps": "E7-01", "size": "XL", "hours": 220, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: NFR. Зависимости: E7-01.", "agent": "Claude"}, {"id": "E7-16", "title": "Горизонтальное масштабирование backend", "stage": "R2", "track": "NFR", "deps": "E0-11", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: NFR. Зависимости: E0-11.", "agent": "Claude"}, {"id": "E7-17", "title": "Очереди задач для тяжёлых операций", "stage": "R2", "track": "NFR", "deps": "E0-08", "size": "L", "hours": 120, "notes": "", "col": "backlog", "priority": "high", "desc": "Трек: NFR. Зависимости: E0-08.", "agent": "Claude"}, {"id": "E7-18", "title": "Миграции БД с откатом (практика и тест)", "stage": "R1", "track": "DevOps", "deps": "E0-12", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: DevOps. Зависимости: E0-12.", "agent": "Cursor"}, {"id": "E7-19", "title": "Бэкапы + тест восстановления", "stage": "A", "track": "DevOps", "deps": "E0-12", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: DevOps. Зависимости: E0-12.", "agent": "Cursor"}, {"id": "E7-20", "title": "DR-план (аварийное восстановление)", "stage": "R2", "track": "DevOps", "deps": "E7-19", "size": "M", "hours": 60, "notes": "", "col": "backlog", "priority": "mid", "desc": "Трек: DevOps. Зависимости: E7-19.", "agent": "Cursor"}, {"id": "E7-21", "title": "Чек-лист принципиальных запретов (quality gate)", "stage": "A", "track": "QA", "deps": "E0-14", "size": "S", "hours": 24, "notes": "", "col": "backlog", "priority": "low", "desc": "Трек: QA. Зависимости: E0-14.", "agent": "Codex"}];
-// ════════════════════════════════════════════
+const DEFAULT_TASKS = [];
+// ============================================
 // STATE
-// ════════════════════════════════════════════
-function getTasksKey(projId){ return 'tasks_'+(projId||'mossb'); }
+// ============================================
+function getTasksKey(projId){ return 'tasks_'+projId; }
 function loadTasksForProject(projId){
+  if(!projId) return [];
   try{
     const s=localStorage.getItem(getTasksKey(projId));
     if(s) return JSON.parse(s);
   }catch(e){}
-  // Default project gets the built-in tasks; new projects start empty
-  return projId==='mossb' ? DEFAULT_TASKS.map(t=>({...t})) : [];
+  return DEFAULT_TASKS.map(t=>({...t}));
 }
 function loadTasks(){ return loadTasksForProject(loadActiveProject()); }
-function save(){ try{localStorage.setItem(getTasksKey(activeProjId),JSON.stringify(tasks));}catch(e){} }
+function save(){ if(!activeProjId) return; try{localStorage.setItem(getTasksKey(activeProjId),JSON.stringify(tasks));}catch(e){} }
 
 let tasks=loadTasks(),curStage='all',searchQ='',activeId=null,chatHist=[],ntHist=[],pendingTask=null,newTaskCol='backlog';
 
-// ════════════════════════════════════════════
+// ============================================
 // THEME
-// ════════════════════════════════════════════
+// ============================================
 let theme=localStorage.getItem('mossb_theme')||'dark';
 function applyTheme(){document.documentElement.setAttribute('data-theme',theme);document.getElementById('theme-btn').textContent=theme==='dark'?'☀️':'🌙';updateStageTabs();}
 function toggleTheme(){theme=theme==='dark'?'light':'dark';localStorage.setItem('mossb_theme',theme);applyTheme();}
 applyTheme();
 
-// ════════════════════════════════════════════
+// ============================================
 // TIMER
-// ════════════════════════════════════════════
+// ============================================
 let timerRunning=false,delayRunning=false;
 let projMs=parseInt(localStorage.getItem('mossb_proj_ms'))||0;
 let delMs=parseInt(localStorage.getItem('mossb_del_ms'))||0;
@@ -764,7 +828,7 @@ function toggleTimer(){
     projStart=Date.now()-projMs;
     timerInt=setInterval(tickTimer,1000);
   } else if(timerMode==='project'){
-    // Stop project → start delay
+    // Stop project -> start delay
     timerRunning=false;
     projMs=Date.now()-projStart;
     clearInterval(timerInt);
@@ -773,7 +837,7 @@ function toggleTimer(){
     delStart=Date.now()-delMs;
     timerInt=setInterval(tickTimer,1000);
   } else {
-    // Stop delay → resume project
+    // Stop delay -> resume project
     delayRunning=false;
     delMs=Date.now()-delStart;
     clearInterval(timerInt);
@@ -846,15 +910,15 @@ if(timerMode==='project'){
 // Set button state after DOM ready
 setTimeout(applyTimerUI, 0);
 
-// ════════════════════════════════════════════
+// ============================================
 // SEARCH
-// ════════════════════════════════════════════
+// ============================================
 function onSearch(q){searchQ=q.toLowerCase().trim();render();}
 
 
-// ════════════════════════════════════════════
+// ============================================
 // DYNAMIC STAGE TABS
-// ════════════════════════════════════════════
+// ============================================
 const STAGE_LABELS = {'A':'Этап A','R1':'R1 MVP','R1.1':'R1.1 B2B','R2':'R2 Full','R2+':'R2+','R3+':'R3+','R4+':'R4+','F':'Launch'};
 
 function renderStageTabs(){
@@ -916,9 +980,9 @@ function renderStageTabs(){
   updateStageTabs();
 }
 
-// ════════════════════════════════════════════
+// ============================================
 // HELPERS
-// ════════════════════════════════════════════
+// ============================================
 function getFiltered(){
   let ft;
   if(curStage==='all')ft=tasks;
@@ -931,9 +995,9 @@ function getFiltered(){
 function sc(s){return SC[s]||'#888';}
 function fmtBudget(n){if(n>=1000000)return(n/1000000).toFixed(3).replace(/\.?0+$/,'')+'M';if(n>=1000)return(n/1000).toFixed(0)+'K';return n+'';}
 
-// ════════════════════════════════════════════
+// ============================================
 // STATS
-// ════════════════════════════════════════════
+// ============================================
 function updateStats(){
   const done=tasks.filter(t=>t.col==='done').length;
   const wip=tasks.filter(t=>t.col==='inprogress').length;
@@ -950,9 +1014,9 @@ function updateStats(){
   // stage counts now handled by renderStageTabs()
 }
 
-// ════════════════════════════════════════════
+// ============================================
 // STAGE TABS
-// ════════════════════════════════════════════
+// ============================================
 function updateStageTabs(){
   document.querySelectorAll('.stab').forEach(btn=>{
     const s=btn.dataset.stage,isActive=s===curStage,color=STAB_C[s];
@@ -964,9 +1028,9 @@ function updateStageTabs(){
 }
 function setStage(s,btn){curStage=s;updateStageTabs();render();}
 
-// ════════════════════════════════════════════
+// ============================================
 // RENDER
-// ════════════════════════════════════════════
+// ============================================
 function render(){
   const board=document.getElementById('board');
   const ft=getFiltered();
@@ -1007,7 +1071,7 @@ function render(){
 
     // Footer
     const foot=document.createElement('div');foot.className='col-footer';
-    foot.innerHTML=`<button class="col-add-btn" onclick="openNewTask('${col.id}')">＋ задача</button>`;
+    foot.innerHTML=`<button class="col-add-btn" onclick="openNewTask('${col.id}')">+ задача</button>`;
     colEl.appendChild(foot);
 
     board.appendChild(colEl);
@@ -1044,9 +1108,9 @@ function makeCardEl(t){
 // Keep renderCard as alias used nowhere else (safety)
 function renderCard(t){ return makeCardEl(t).outerHTML; }
 
-// ════════════════════════════════════════════
+// ============================================
 // TASK VIEW MODAL
-// ════════════════════════════════════════════
+// ============================================
 function openTask(id){
   activeId=id;const t=tasks.find(x=>x.id===id);if(!t)return;
   const color=sc(t.stage);
@@ -1072,15 +1136,15 @@ function openTask(id){
 function closeTask(){document.getElementById('task-ov').classList.remove('open');activeId=null;}
 function changeCol(id,col){const t=tasks.find(x=>x.id===id);if(t){t.col=col;save();render();}}
 
-// ════════════════════════════════════════════
+// ============================================
 // AI CHAT (task modal)
-// ════════════════════════════════════════════
+// ============================================
 async function sendMsg(){
   const inp=document.getElementById('ai-in');const text=inp.value.trim();if(!text||!activeId)return;
   const t=tasks.find(x=>x.id===activeId);inp.value='';inp.style.height='auto';
   appendTo('ai-msgs','user',text);chatHist.push({role:'user',content:text});
   const btn=document.getElementById('ai-btn');btn.disabled=true;showTyping('ai-msgs');
-  const sys=`Ты — Claude, Tech Lead проекта mossb.ru. B2B-платформа оптовых закупок электрики.\nСтек: PostgreSQL, Elasticsearch, Redis, S3, Next.js, Node.js/TypeScript, Docker, GitHub Actions.\nЗадача: [${t.id}] ${t.title} | Этап: ${t.stage} | Трек: ${t.track} | Агент: ${t.agent}\nОписание: ${t.desc}\nОтвечай кратко и технично на русском.`;
+  const sys=`Ты — Claude, Tech Lead проекта PlanKanban. Канбан для планирования задач команды.\nСтек: PostgreSQL, Elasticsearch, Redis, S3, Next.js, Node.js/TypeScript, Docker, GitHub Actions.\nЗадача: [${t.id}] ${t.title} | Этап: ${t.stage} | Трек: ${t.track} | Агент: ${t.agent}\nОписание: ${t.desc}\nОтвечай кратко и технично на русском.`;
   try{
     const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,system:sys,messages:chatHist})});
     const data=await res.json();const reply=data.content?.map(b=>b.text||'').join('')||'Ошибка.';
@@ -1089,9 +1153,9 @@ async function sendMsg(){
   btn.disabled=false;
 }
 
-// ════════════════════════════════════════════
+// ============================================
 // NEW TASK CHAT
-// ════════════════════════════════════════════
+// ============================================
 function openNewTask(col){
   newTaskCol=col||'backlog';ntHist=[];pendingTask=null;
   document.getElementById('task-preview').classList.remove('show');
@@ -1110,7 +1174,7 @@ async function sendNewTask(){
   appendTo('nt-chat','user',text);ntHist.push({role:'user',content:text});
   const btn=document.getElementById('nt-btn');btn.disabled=true;showTyping('nt-chat');
 
-  const sys=`Ты — Claude, Tech Lead B2B-платформы mossb.ru (закупки электрики и систем безопасности).
+  const sys=`Ты — Claude, Tech Lead проекта PlanKanban.
 Стек: PostgreSQL, Elasticsearch, Redis, S3, Next.js, Node.js/TypeScript, Docker, GitHub Actions.
 Этапы: A (архитектура/инфра), R1 (MVP: каталог/поиск/корзина/оформление), R1.1 (B2B/RBAC/2FA/лимиты), R2 (BOM-хаб/EDI/склад/внешний API), R3+ (лояльность/маркет/SEO), F (стабилизация/запуск/поддержка).
 Агенты (все — ИИ, работают быстрее людей):
@@ -1173,9 +1237,9 @@ function reviseTask(){
   document.getElementById('nt-ta').focus();
 }
 
-// ════════════════════════════════════════════
+// ============================================
 // MSG UTILS
-// ════════════════════════════════════════════
+// ============================================
 function fmtMsg(t){
   return t.replace(/\n/g,'<br>')
     .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
@@ -1191,15 +1255,15 @@ const typEls={};
 function showTyping(cid){const c=document.getElementById(cid);const d=document.createElement('div');d.className='msg ai';d.innerHTML=`<div class="msg-av ai">✦</div><div class="msg-bub"><div class="typing"><span></span><span></span><span></span></div></div>`;c.appendChild(d);c.scrollTop=c.scrollHeight;typEls[cid]=d;}
 function hideTyping(cid){if(typEls[cid]){typEls[cid].remove();delete typEls[cid];}}
 
-// ════════════════════════════════════════════
+// ============================================
 // KEYBOARD
-// ════════════════════════════════════════════
+// ============================================
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeTask();closeNewTask();}});
 
 
-// ════════════════════════════════════════════
+// ============================================
 // DRAG & DROP
-// ════════════════════════════════════════════
+// ============================================
 function onDragStart(e){
   isDragging=true;
   const card=e.currentTarget;
@@ -1322,9 +1386,9 @@ function updateColCounts(){
 }
 
 
-// ════════════════════════════════════════════
-// IMPORT (Excel / Text → Claude)
-// ════════════════════════════════════════════
+// ============================================
+// IMPORT (Excel / Text -> Claude)
+// ============================================
 let importParsedTasks = [];
 let importRawData = null; // raw text or sheet data
 
@@ -1491,7 +1555,8 @@ function confirmImport(){
   closeImport();
   render();
   // Show success toast
-  showToast('✓ Добавлено ' + toAdd.length + ' задач в ' + getActiveProject().name);
+  const activeProjectName = (getActiveProject() && getActiveProject().name) || 'проект';
+  showToast('✓ Добавлено ' + toAdd.length + ' задач в ' + activeProjectName);
 }
 
 function showToast(msg){
@@ -1501,31 +1566,44 @@ function showToast(msg){
   document.body.appendChild(t);
   setTimeout(()=>t.remove(), 3000);
 }
-// ════════════════════════════════════════════
+// ============================================
 // INIT
-// ════════════════════════════════════════════
+// ============================================
 
-// ════════════════════════════════════════════
+// ============================================
 // PROJECTS
-// ════════════════════════════════════════════
-const DEFAULT_PROJECT = {id:'mossb',name:'mossb.ru — B2B платформа',weeks:50,budget:5100000};
+// ============================================
+const DEFAULT_PROJECT = {id:'',name:'PlanKanban24',weeks:50,budget:5100000};
 
 function loadProjects(){
   try{const s=localStorage.getItem('mossb_projects');if(s)return JSON.parse(s);}catch(e){}
-  return [DEFAULT_PROJECT];
+  return [];
 }
 function saveProjects(){
   try{localStorage.setItem('mossb_projects',JSON.stringify(projects));}catch(e){}
 }
 function loadActiveProject(){
-  return localStorage.getItem('mossb_active_proj')||'mossb';
+  return localStorage.getItem('mossb_active_proj')||'';
 }
 
 let projects = loadProjects();
 let activeProjId = loadActiveProject();
 
+if(
+  projects.length===1 &&
+  projects[0] &&
+  projects[0].id==='mossb' &&
+  /mossb\.ru/i.test(projects[0].name||'')
+){
+  projects = [];
+  activeProjId = '';
+  try{ localStorage.removeItem('mossb_projects'); }catch(e){}
+  try{ localStorage.removeItem('mossb_active_proj'); }catch(e){}
+  try{ localStorage.removeItem('tasks_mossb'); }catch(e){}
+}
+
 function getActiveProject(){
-  return projects.find(p=>p.id===activeProjId)||projects[0]||DEFAULT_PROJECT;
+  return projects.find(p=>p.id===activeProjId)||projects[0]||null;
 }
 
 function renderProjList(){
@@ -1566,11 +1644,15 @@ function closeAllDropdowns(){
 document.addEventListener('click', ()=>closeAllDropdowns());
 
 function switchProject(id){
-  activeProjId = id;
-  localStorage.setItem('mossb_active_proj', id);
+  activeProjId = id || '';
+  if(activeProjId){
+    localStorage.setItem('mossb_active_proj', activeProjId);
+  }else{
+    localStorage.removeItem('mossb_active_proj');
+  }
   // Save current project tasks first (already saved on each change, but be safe)
   // Load tasks for the new project
-  tasks = loadTasksForProject(id);
+  tasks = activeProjId ? loadTasksForProject(activeProjId) : [];
   closeAllDropdowns();
   curStage = 'all';
   updateStageTabs();
@@ -1580,8 +1662,9 @@ function switchProject(id){
 
 function applyProjectSettings(){
   const p = getActiveProject();
-  const totalBudget = p.budget||5100000;
-  const totalWeeks  = p.weeks||50;
+  const totalBudget = (p && p.budget)||5100000;
+  const totalWeeks  = (p && p.weeks)||50;
+  const projectName = (p && p.name)||'Без проекта';
   // Budget chip
   const bt = document.querySelector('.b-total');
   if(bt) bt.textContent = '/ ' + fmtBudget(totalBudget) + ' ₽';
@@ -1590,9 +1673,9 @@ function applyProjectSettings(){
   if(wlbl) wlbl.textContent = '/ '+totalWeeks+' нед';
   // Header project title
   const ptl = document.getElementById('proj-title-label');
-  if(ptl) ptl.textContent = p.name;
+  if(ptl) ptl.textContent = projectName;
   // Document title
-  document.title = p.name + ' — PlanKanban24';
+  document.title = projectName + ' — PlanKanban24';
 }
 
 function openNewProjectModal(){
@@ -1600,15 +1683,15 @@ function openNewProjectModal(){
   // Reuse settings modal but in "create" mode
   editingProjId = '__new__';
   document.getElementById('ps-name').value = '';
-  document.getElementById('ps-weeks').value = '50';
-  document.getElementById('ps-budget').value = '5100000';
+  document.getElementById('ps-weeks').value = '0';
+  document.getElementById('ps-budget').value = '0';
   document.getElementById('ps-proj-name-hint').textContent = 'Новый проект';
   // Change modal title
   const title = document.querySelector('.ps-title');
   if(title) title.textContent = 'Новый проект';
   const icon = document.querySelector('.ps-icon');
   if(icon) icon.textContent = '🆕';
-  const saveBtn = document.querySelector('#ps-ov .btn-create');
+  const saveBtn = document.getElementById('ps-save-btn');
   if(saveBtn) saveBtn.textContent = 'Создать';
   const delBtn = document.getElementById('btn-delete-proj');
   if(delBtn) delBtn.classList.add('hidden');
@@ -1618,7 +1701,7 @@ function openNewProjectModal(){
 
 function newProject(){ openNewProjectModal(); }
 
-// ── PROJECT SETTINGS ──
+// -- PROJECT SETTINGS --
 let editingProjId = null;
 
 function openProjSettings(id){
@@ -1626,19 +1709,19 @@ function openProjSettings(id){
   editingProjId = id;
   const p = projects.find(x=>x.id===id)||DEFAULT_PROJECT;
   document.getElementById('ps-name').value   = p.name;
-  document.getElementById('ps-weeks').value  = p.weeks||50;
-  document.getElementById('ps-budget').value = p.budget||5100000;
+  document.getElementById('ps-weeks').value  = p.weeks ?? 0;
+  document.getElementById('ps-budget').value = p.budget ?? 0;
   document.getElementById('ps-proj-name-hint').textContent = p.name;
   // Reset to edit mode labels
   const title = document.querySelector('.ps-title');
   if(title) title.textContent = 'Настройки проекта';
   const icon = document.querySelector('.ps-icon');
   if(icon) icon.textContent = '⚙️';
-  const saveBtn = document.querySelector('#ps-ov .btn-create');
+  const saveBtn = document.getElementById('ps-save-btn');
   if(saveBtn) saveBtn.textContent = 'Сохранить';
   const delBtn = document.getElementById('btn-delete-proj');
   if(delBtn){
-    // Show delete for all projects; even mossb can be deleted if there are others
+    // Show delete for all projects
     delBtn.classList.remove('hidden');
   }
   document.getElementById('ps-ov').classList.add('open');
@@ -1688,11 +1771,11 @@ function doDeleteProject(projId){
   projects = projects.filter(x=>x.id!==projId);
   saveProjects();
   closeProjSettings();
-  if(!projects.length){
-    projects = [{...DEFAULT_PROJECT}];
-    saveProjects();
+  if(projects.length){
+    switchProject(projects[0].id);
+  }else{
+    switchProject('');
   }
-  switchProject(projects[0].id);
 }
 
 function closeProjSettings(){
@@ -1703,8 +1786,8 @@ function closeProjSettings(){
 function saveProjSettings(){
   if(!editingProjId) return;
   const name   = document.getElementById('ps-name').value.trim();
-  const weeks  = parseInt(document.getElementById('ps-weeks').value)||50;
-  const budget = parseInt(document.getElementById('ps-budget').value)||5100000;
+  const weeks  = parseInt(document.getElementById('ps-weeks').value, 10) || 0;
+  const budget = parseInt(document.getElementById('ps-budget').value, 10) || 0;
   if(!name) { document.getElementById('ps-name').focus(); return; }
 
   if(editingProjId === '__new__'){
@@ -1743,7 +1826,7 @@ updateStats = function(){
   let earned=0;
   stages.forEach(s=>{const st=tasks.filter(t=>t.stage===s);if(!st.length)return;earned+=Math.round((STAGE_BUDGETS[s]||0)*st.filter(t=>t.col==='done').length/st.length);});
   document.getElementById('b-earned').textContent=fmtBudget(earned)+' ₽';
-  const totalBudget = p.budget||5100000;
+  const totalBudget = (p && p.budget)||5100000;
   document.getElementById('b-bar').style.width=Math.round(earned/totalBudget*100)+'%';
   const bt=document.querySelector('.b-total');
   if(bt) bt.textContent='/ '+fmtBudget(totalBudget)+' ₽';
@@ -1763,6 +1846,8 @@ applyProjectSettings();
 render();
 updateStageTabs();
 </script>
+<script src="/frontend/js/api-bridge.js"></script>
+<script src="/frontend/js/analytics.js"></script>
 
 <!-- PROJECT SETTINGS MODAL -->
 <div class="overlay" id="ps-ov" onclick="if(event.target===this)closeProjSettings()">
@@ -1778,18 +1863,18 @@ updateStageTabs();
     <div class="ps-body">
       <div class="ps-field">
         <div class="ps-label">Название проекта</div>
-        <input class="ps-input" id="ps-name" placeholder="mossb.ru — B2B платформа">
+        <input class="ps-input" id="ps-name" placeholder="Новый проект">
       </div>
       <div class="ps-input-group">
         <div class="ps-field">
           <div class="ps-label">Срок выполнения (недель)</div>
-          <input class="ps-input" id="ps-weeks" type="number" min="1" placeholder="50">
+          <input class="ps-input" id="ps-weeks" type="number" min="0" placeholder="0">
         </div>
         <div class="ps-field">
           <div class="ps-label">Стоимость проекта (₽)</div>
           <div class="ps-budget-wrap">
             <span class="ps-budget-prefix">₽</span>
-            <input class="ps-input has-prefix" id="ps-budget" type="number" placeholder="5100000">
+            <input class="ps-input has-prefix" id="ps-budget" type="number" placeholder="0">
           </div>
         </div>
       </div>
@@ -1797,7 +1882,7 @@ updateStageTabs();
     <div class="ps-footer">
       <button class="btn-delete-proj" id="btn-delete-proj" onclick="deleteProject()">🗑 Удалить</button>
       <div style="margin-left:auto;">
-        <button class="btn-create" onclick="saveProjSettings()">Сохранить</button>
+        <button class="btn-create" id="ps-save-btn" onclick="saveProjSettings()">Сохранить</button>
       </div>
     </div>
   </div>
@@ -1857,3 +1942,6 @@ updateStageTabs();
 </div>
 </body>
 </html>
+
+
+

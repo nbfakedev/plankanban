@@ -116,6 +116,7 @@ GET `/projects`
 - 200:
 ```json
 {
+  "active_project_id": "uuid|null",
   "projects": [
     {
       "id": "uuid",
@@ -123,6 +124,12 @@ GET `/projects`
       "created_by": "uuid",
       "llm_provider": null,
       "llm_model": null,
+      "duration_weeks": 0,
+      "budget_total": 0,
+      "stages": ["A","R1","R1.1","R2","R3+","F"],
+      "stage_settings": [
+        { "name": "A", "budget": 200000, "color": "#4a9eff" }
+      ],
       "created_at": "timestamp",
       "updated_at": "timestamp"
     }
@@ -135,7 +142,18 @@ GET `/projects`
 
 POST `/projects`
 - roles: `admin`, `techlead`
-- body: `{ "name": "string" }`
+- body:
+```json
+{
+  "name": "string",
+  "duration_weeks": 10,
+  "budget_total": 5000000,
+  "stages": ["A","R1","R1.1","R2","R3+","F"],
+  "stage_settings": [
+    { "name": "A", "budget": 1000000, "color": "#4a9eff" }
+  ]
+}
+```
 - 201:
 ```json
 {
@@ -145,6 +163,12 @@ POST `/projects`
     "created_by": "uuid",
     "llm_provider": null,
     "llm_model": null,
+    "duration_weeks": 10,
+    "budget_total": 5000000,
+    "stages": ["A","R1","R1.1","R2","R3+","F"],
+    "stage_settings": [
+      { "name": "A", "budget": 1000000, "color": "#4a9eff" }
+    ],
     "created_at": "timestamp",
     "updated_at": "timestamp"
   }
@@ -167,6 +191,12 @@ GET `/projects/:id`
     "created_by": "uuid",
     "llm_provider": null,
     "llm_model": null,
+    "duration_weeks": 10,
+    "budget_total": 5000000,
+    "stages": ["A","R1","R1.1","R2","R3+","F"],
+    "stage_settings": [
+      { "name": "A", "budget": 1000000, "color": "#4a9eff" }
+    ],
     "created_at": "timestamp",
     "updated_at": "timestamp"
   }
@@ -176,33 +206,103 @@ GET `/projects/:id`
 - 404: `{ "error": "project_not_found" }`
 - 500: `{ "error": "projects_unavailable" }`
 
+PATCH `/projects/:id`
+- roles: `admin`, `techlead`
+- body: same as `POST /projects`
+- 200: `{ "project": { ... } }`
+- 400: `{ "error": "invalid_project_id|invalid_payload" }`
+- 404: `{ "error": "project_not_found" }`
+- 409: `{ "error": "stages_in_use", "stages": [{ "name": "A", "count": 3 }] }`
+- 500: `{ "error": "projects_unavailable" }`
+
+DELETE `/projects/:id`
+- roles: `admin`, `techlead`
+- body:
+```json
+{
+  "confirm_name": "Exact Project Name"
+}
+```
+- `confirm_name` must match project name exactly (100%).
+- Deletes project and all linked tasks/events/active mappings via DB cascade.
+- 200:
+```json
+{
+  "deleted_project_id": "uuid",
+  "deleted_project_name": "Exact Project Name",
+  "deleted_tasks": 5
+}
+```
+- 400: `{ "error": "invalid_project_id|invalid_payload" }`
+- 404: `{ "error": "project_not_found" }`
+- 409: `{ "error": "project_name_mismatch" }`
+- 500: `{ "error": "projects_unavailable" }`
+
+GET `/projects/active`
+- roles: `admin`, `techlead`, `employee`
+- returns active project resolved per user (fallback to first visible project)
+- 200:
+```json
+{
+  "id": "uuid|null",
+  "name": "string",
+  "duration_weeks": 10,
+  "budget_total": 5000000,
+  "stages": ["A","R1","R1.1","R2","R3+","F"],
+  "stage_settings": [
+    { "name": "A", "budget": 1000000, "color": "#4a9eff" }
+  ]
+}
+```
+- 500: `{ "error": "projects_unavailable" }`
+
+POST `/projects/activate`
+- roles: `admin`, `techlead`, `employee`
+- body: `{ "project_id": "uuid|null" }`
+- 200:
+```json
+{
+  "project": {
+    "id": "uuid",
+    "name": "string"
+  }
+}
+```
+- 400: `{ "error": "invalid_payload" }`
+- 404: `{ "error": "project_not_found" }`
+- 500: `{ "error": "projects_unavailable" }`
+
 ## Tasks API
 All endpoints require `Authorization: Bearer <token>`.
 
 Audit behavior for task mutations:
-- `POST /projects/:projectId/tasks`, `PATCH /tasks/:id`, `POST /tasks/:id/move` write one row to `task_events`.
-- Stored fields: `actor_user_id`, `action` (`create|update|move`), `before` (JSON), `after` (JSON), `created_at`.
+- `POST /projects/:projectId/tasks`, `PATCH /tasks/:id`, `POST /tasks/:id/move`, `PATCH /tasks/reorder`, `DELETE /tasks/:id` write audit rows to `task_events`.
+- event types for core task flow: `task_created`, `task_updated`, `task_moved`, `task_reordered`, `task_deleted`.
+- Stored fields: `actor_user_id`, `event_type`, `payload` (+ legacy `action`, `before`, `after`), `created_at`.
 - Task change and audit insert are committed in a single DB transaction.
 
 GET `/projects/:projectId/tasks`
 - roles: `admin`, `techlead`, `employee`
 - employee sees only tasks where `assignee_user_id = current user id`
+- order: `ORDER BY col, position, created_at`
 - 200:
 ```json
 {
   "tasks": [
     {
       "id": "uuid",
+      "public_id": 123,
       "project_id": "uuid",
       "title": "string",
       "col": "backlog|todo|doing|review|done",
+      "position": 0,
       "stage": "string|null",
       "assignee_user_id": "uuid|null",
       "track": "string|null",
       "agent": "string|null",
       "priority": 0,
       "hours": 1.5,
-      "desc": "string|null",
+      "descript": "string|null",
       "notes": "string|null",
       "deps": {},
       "created_at": "timestamp",
@@ -215,6 +315,51 @@ GET `/projects/:projectId/tasks`
 - 404: `{ "error": "project_not_found" }`
 - 500: `{ "error": "tasks_unavailable" }`
 
+GET `/projects/:projectId/events`
+- roles: `admin`, `techlead`
+- query:
+  - `limit` (optional, default `100`, max `500`)
+  - `offset` (optional, default `0`)
+- 200:
+```json
+{
+  "events": [
+    {
+      "event_type": "task_moved",
+      "payload": { "from_col": "todo", "to_col": "doing" },
+      "actor_user_id": "uuid",
+      "task_id": "uuid",
+      "created_at": "timestamp"
+    }
+  ],
+  "limit": 100,
+  "offset": 0
+}
+```
+- 400: `{ "error": "invalid_project_id|invalid_payload" }`
+- 404: `{ "error": "project_not_found" }`
+- 500: `{ "error": "events_unavailable" }`
+
+GET `/projects/:projectId/metrics`
+- roles: `admin`, `techlead`, `employee`
+- 200:
+```json
+{
+  "tasks_total": 120,
+  "tasks_done": 45,
+  "tasks_in_progress": 12,
+  "completion_percent": 37.5,
+  "velocity_tasks_per_week": 9.2,
+  "avg_task_cycle_time_hours": 18.4,
+  "tasks_created_last_week": 11,
+  "tasks_completed_last_week": 9
+}
+```
+- metrics are aggregated from `tasks`, `task_events` and timer state.
+- 400: `{ "error": "invalid_project_id" }`
+- 404: `{ "error": "project_not_found" }`
+- 500: `{ "error": "metrics_unavailable" }`
+
 POST `/projects/:projectId/tasks`
 - roles: `admin`, `techlead`
 - body (minimum):
@@ -225,6 +370,9 @@ POST `/projects/:projectId/tasks`
 }
 ```
 - `status` can be used as alias for `col`
+- `descript` is the canonical DB-backed description field.
+- Backward compatibility: request payload can use `descript` or `description`.
+- `descript`: optional `string`, max length `5000`.
 - 201: `{ "task": { ...task } }`
 - 400: `{ "error": "invalid_project_id|invalid_payload" }`
 - 404: `{ "error": "project_not_found" }`
@@ -232,9 +380,146 @@ POST `/projects/:projectId/tasks`
 
 PATCH `/tasks/:id`
 - roles: `admin`, `techlead`
-- body: any mutable task fields (`title`, `col`/`status`, `stage`, `assignee_user_id`, `track`, `agent`, `priority`, `hours`, `desc`, `notes`, `deps`)
+- body: any mutable task fields (`title`, `col`/`status`, `stage`, `assignee_user_id`, `track`, `agent`, `priority`, `hours`, `descript`, `description`, `notes`, `deps`)
+- `descript`: optional `string`, max length `5000`.
 - 200: `{ "task": { ...task } }`
 - 400: `{ "error": "invalid_task_id|invalid_payload" }`
+- 404: `{ "error": "task_not_found" }`
+- 500: `{ "error": "tasks_unavailable" }`
+
+PATCH `/tasks/reorder`
+- roles: `admin`, `techlead`
+- body:
+```json
+{
+  "column": "todo",
+  "order": ["uuid-1", "uuid-2", "uuid-3"]
+}
+```
+- `column` supports same values as `col/status` (`backlog|todo|doing|review|done`, plus aliases).
+- `order` must be UUID array of tasks from one project and one column.
+- 200:
+```json
+{
+  "column": "todo",
+  "updated": 3
+}
+```
+- 400: `{ "error": "invalid_payload" }`
+- 404: `{ "error": "task_not_found" }`
+- 409: `{ "error": "task_column_mismatch" }`
+- 500: `{ "error": "tasks_unavailable" }`
+
+GET `/tasks/:id/events`
+- roles: `admin`, `techlead`
+- 200:
+```json
+[
+  {
+    "event_type": "task_reordered",
+    "payload": {
+      "column": "todo",
+      "order": ["uuid-1", "uuid-2", "uuid-3"],
+      "position": 1
+    },
+    "actor_user_id": "uuid",
+    "created_at": "timestamp"
+  }
+]
+```
+- 400: `{ "error": "invalid_task_id" }`
+- 500: `{ "error": "events_unavailable" }`
+
+DELETE `/tasks/:id`
+- roles: `admin`, `techlead`
+- moves task to `task_trash` archive before deleting from active board.
+- 200:
+```json
+{
+  "deleted_task_id": "uuid",
+  "deleted_public_id": 123
+}
+```
+- 400: `{ "error": "invalid_task_id" }`
+- 404: `{ "error": "task_not_found" }`
+- 500: `{ "error": "tasks_unavailable" }`
+
+GET `/tasks/trash`
+- roles: `admin`, `techlead`
+- query params (optional):
+  - `q`: full-text search by `id/title/descript/notes/stage/agent`
+  - `project_id`: UUID
+  - `stage`: stage name
+  - `deleted_by`: deleter identifier/email/name
+  - `deleted_from`: ISO date (`YYYY-MM-DD`)
+  - `deleted_to`: ISO date (`YYYY-MM-DD`)
+  - `limit`: integer (default `100`)
+- 200:
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "public_id": 123,
+      "title": "Task title",
+      "col": "backlog|todo|doing|review|done",
+      "stage": "A",
+      "agent": "Claude",
+      "size": "M",
+      "hours": 8,
+      "descript": "string|null",
+      "notes": "string|null",
+      "project_id": "uuid",
+      "project_name": "Project name",
+      "deleted_at": "timestamp",
+      "deleted_by_name": "Admin"
+    }
+  ]
+}
+```
+- 400: `{ "error": "invalid_payload" }`
+- 500: `{ "error": "trash_unavailable" }`
+
+POST `/tasks/:id/restore`
+- roles: `admin`, `techlead`
+- body:
+```json
+{
+  "project_id": "uuid",
+  "col": "backlog|todo|doing|review|done",
+  "stage": "A",
+  "create_stage_if_missing": false
+}
+```
+- `project_id`, `col`, `stage` are required.
+- if `create_stage_if_missing=true`, backend may create stage in target project settings before restore.
+- 200:
+```json
+{
+  "task": {
+    "id": "uuid",
+    "public_id": 123,
+    "project_id": "uuid",
+    "col": "doing",
+    "stage": "A"
+  }
+}
+```
+- 400: `{ "error": "invalid_task_id|invalid_payload" }`
+- 404: `{ "error": "task_not_found" }`
+- 409: `{ "error": "stage_not_found" }`
+- 500: `{ "error": "restore_unavailable" }`
+
+DELETE `/tasks/:id/permanent`
+- roles: `admin`, `techlead`
+- permanently deletes task from trash storage.
+- 200:
+```json
+{
+  "deleted_task_id": "uuid"
+}
+```
+- 400: `{ "error": "invalid_task_id" }`
 - 404: `{ "error": "task_not_found" }`
 - 500: `{ "error": "tasks_unavailable" }`
 
@@ -286,6 +571,126 @@ curl.exe -sS "http://localhost:3000/projects/$projectId/tasks" `
   -H "Content-Type: application/json" `
   --data-binary @-
 ```
+
+## Header Stats API
+All endpoints require `Authorization: Bearer <token>`.
+
+GET `/stats/tasks`
+- roles: `admin`, `techlead`, `employee`
+- uses user active project (`/projects/active`)
+- employee scope: counts only assigned tasks
+- 200:
+```json
+{
+  "backlog": 10,
+  "in_work": 5,
+  "done": 3
+}
+```
+- 500: `{ "error": "stats_unavailable" }`
+
+GET `/stats/budget`
+- roles: `admin`, `techlead`, `employee`
+- budget logic: each configured project stage contributes `budget_total / stages.length` when all tasks in that stage are `done`
+- 200:
+```json
+{
+  "earned": 1000000,
+  "total": 5000000,
+  "progress": 0.2
+}
+```
+- 500: `{ "error": "stats_unavailable" }`
+
+## Timer API
+All endpoints require `Authorization: Bearer <token>`.
+
+GET `/timer`
+- roles: `admin`, `techlead`, `employee`
+- 200:
+```json
+{
+  "project_time": "P0DT12H35M10S",
+  "client_delay_time": "P0DT1H11M3S",
+  "project_time_ms": 45310000,
+  "client_delay_time_ms": 4263000,
+  "deadline": "2026-06-01T10:20:30.000Z",
+  "status": "running|paused"
+}
+```
+
+POST `/timer/start`
+- roles: `admin`, `techlead`
+- starts project timer on server; if paused, resumes and closes delay interval
+- 200: same payload as `GET /timer`
+- 404: `{ "error": "project_not_found" }`
+- 500: `{ "error": "timer_unavailable" }`
+
+POST `/timer/stop`
+- roles: `admin`, `techlead`
+- pauses project timer and starts/continues client delay timer
+- 200: same payload as `GET /timer`
+- 404: `{ "error": "project_not_found" }`
+- 500: `{ "error": "timer_unavailable" }`
+
+POST `/timer/complete`
+- roles: `admin`, `techlead`
+- freezes both project and client delay timers (used for "project completed" mode)
+- 200: same payload as `GET /timer`
+- 404: `{ "error": "project_not_found" }`
+- 500: `{ "error": "timer_unavailable" }`
+
+## Import and Task Dialog API
+All endpoints require `Authorization: Bearer <token>`.
+
+POST `/import/excel`
+- roles: `admin`, `techlead`
+- body:
+```json
+{
+  "project_id": "uuid-optional",
+  "file_name": "tasks.xlsx",
+  "content": "parsed excel/text payload"
+}
+```
+- flow: parse content via LLM (`purpose=import_parse`) and create backlog tasks
+- 201:
+```json
+{
+  "created": 12,
+  "tasks": [ { "id": "uuid", "title": "..." } ]
+}
+```
+- 400: `{ "error": "invalid_payload|empty_import" }`
+- 404: `{ "error": "project_not_found" }`
+- 500: `{ "error": "import_unavailable" }`
+
+POST `/llm/task-dialog`
+- roles: `admin`, `techlead` (`employee` gets `403`)
+- body:
+```json
+{
+  "project_id": "uuid-optional",
+  "messages": [
+    { "role": "user", "content": "..." },
+    { "role": "assistant", "content": "..." }
+  ]
+}
+```
+- 200:
+```json
+{
+  "title": "string",
+  "descript": "string",
+  "stage": "string",
+  "priority": 2
+}
+```
+- 400: `{ "error": "invalid_payload" }`
+- 403: `{ "error": "forbidden" }`
+- 429: `{ "error": "rate_limited" }`
+- 502: `{ "error": "llm_unavailable" }`
+- 500: `{ "error": "internal_error" }`
 
 ## LLM Gateway API
 All endpoints require `Authorization: Bearer <token>`.
@@ -424,4 +829,239 @@ Invoke-RestMethod -Method Post `
   -Headers $headers `
   -ContentType "application/json" `
   -Body $body
+```
+
+## Service Accounts API (Agent Access)
+Service endpoints are backend-only and use user JWT auth for management.
+
+POST `/api/service-accounts`
+- auth: `Authorization: Bearer <admin-jwt>`
+- body:
+```json
+{
+  "name": "Codex Runner",
+  "scopes": ["tasks:read", "tasks:comment", "tasks:move", "tasks:write", "events:read"]
+}
+```
+- 201 (token is returned once):
+```json
+{
+  "id": "uuid",
+  "name": "Codex Runner",
+  "scopes": ["tasks:read", "tasks:comment"],
+  "token": "service-token"
+}
+```
+- 400: `{ "error": "invalid_payload" }`
+- 401: `{ "error": "unauthorized" }`
+- 403: `{ "error": "account_inactive|forbidden" }`
+- 500: `{ "error": "internal_error" }`
+
+GET `/api/service-accounts`
+- auth: `Authorization: Bearer <admin-jwt>`
+- 200:
+```json
+{
+  "service_accounts": [
+    {
+      "id": "uuid",
+      "name": "Codex Runner",
+      "scopes": ["tasks:read", "tasks:comment"],
+      "created_at": "timestamp",
+      "revoked_at": null
+    }
+  ]
+}
+```
+- no token/token_hash in response.
+
+PowerShell (`curl.exe`) create example:
+```powershell
+$adminToken = "PASTE_ADMIN_JWT"
+@'
+{
+  "name": "Codex Runner",
+  "scopes": ["tasks:read","tasks:comment","tasks:move","tasks:write","events:read"]
+}
+'@ | curl.exe -sS -X POST "http://localhost:3000/api/service-accounts" `
+  -H "Authorization: Bearer $adminToken" `
+  -H "Content-Type: application/json" `
+  --data-binary @-
+```
+
+PowerShell (`Invoke-RestMethod`) create example:
+```powershell
+$adminToken = "PASTE_ADMIN_JWT"
+$headers = @{ Authorization = "Bearer $adminToken" }
+$body = @{
+  name = "Codex Runner"
+  scopes = @("tasks:read","tasks:comment","tasks:move","tasks:write","events:read")
+} | ConvertTo-Json -Compress
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:3000/api/service-accounts" `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+## Agent IN Gateway
+Agent endpoints use service token auth:
+- header: `x-service-token: <service-token>`
+- scope checks:
+  - `tasks:read` -> `GET /api/agent/context`
+  - `tasks:comment` -> `task_comment`, `task_link_artifact`
+  - `tasks:move` -> `task_move`
+  - `tasks:write` -> `task_patch`, `task_create`
+  - `events:read` -> `GET /api/events`
+
+POST `/api/agent/actions`
+- auth: service token
+- body:
+```json
+{
+  "idempotency_key": "run-2026-03-05-001",
+  "run_id": "uuid-optional",
+  "agent": { "name": "codex", "role": "executor" },
+  "actions": [
+    {
+      "type": "task_comment",
+      "payload": {
+        "task_id": "uuid",
+        "text": "Started implementation",
+        "format": "markdown",
+        "tags": ["progress", "agent"]
+      }
+    }
+  ]
+}
+```
+- 200:
+```json
+{
+  "gateway_request_id": "uuid",
+  "results": [
+    { "action_index": 0, "status": "ok", "task_id": "uuid" }
+  ]
+}
+```
+- idempotency: if `(service_account_id, idempotency_key)` exists, returns stored `response_json` without re-executing actions.
+- errors: `400 invalid_payload`, `401 unauthorized`, `403 forbidden`, `500 internal_error`.
+
+PowerShell (`curl.exe`) example:
+```powershell
+$serviceToken = "PASTE_SERVICE_TOKEN"
+@'
+{
+  "idempotency_key": "demo-001",
+  "agent": { "name": "codex", "role": "executor" },
+  "actions": [
+    {
+      "type": "task_comment",
+      "payload": {
+        "task_id": "PASTE_TASK_UUID",
+        "text": "Agent comment",
+        "format": "text"
+      }
+    }
+  ]
+}
+'@ | curl.exe -sS -X POST "http://localhost:3000/api/agent/actions" `
+  -H "x-service-token: $serviceToken" `
+  -H "Content-Type: application/json" `
+  --data-binary @-
+```
+
+PowerShell (`Invoke-RestMethod`) example:
+```powershell
+$serviceToken = "PASTE_SERVICE_TOKEN"
+$headers = @{ "x-service-token" = $serviceToken }
+$body = @{
+  idempotency_key = "demo-001"
+  agent = @{ name = "codex"; role = "executor" }
+  actions = @(
+    @{
+      type = "task_comment"
+      payload = @{
+        task_id = "PASTE_TASK_UUID"
+        text = "Agent comment"
+        format = "text"
+      }
+    }
+  )
+} | ConvertTo-Json -Depth 8 -Compress
+
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:3000/api/agent/actions" `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+GET `/api/agent/context?task_id=<uuid>`
+- auth: service token + `tasks:read`
+- 200:
+```json
+{
+  "task": { "id": "uuid", "project_id": "uuid", "title": "..." },
+  "project": { "id": "uuid", "name": "..." },
+  "allowed_transitions": [],
+  "capabilities": { "scopes": ["tasks:read"] }
+}
+```
+- currently `allowed_transitions` is empty (`[]`) until explicit transitions model is added.
+
+PowerShell (`curl.exe`) context example:
+```powershell
+$serviceToken = "PASTE_SERVICE_TOKEN"
+$taskId = "PASTE_TASK_UUID"
+curl.exe -sS "http://localhost:3000/api/agent/context?task_id=$taskId" `
+  -H "x-service-token: $serviceToken"
+```
+
+PowerShell (`Invoke-RestMethod`) context example:
+```powershell
+$serviceToken = "PASTE_SERVICE_TOKEN"
+$taskId = "PASTE_TASK_UUID"
+Invoke-RestMethod -Method Get `
+  -Uri "http://localhost:3000/api/agent/context?task_id=$taskId" `
+  -Headers @{ "x-service-token" = $serviceToken }
+```
+
+## Events Feed (OUT Polling)
+GET `/api/events?since=<timestamptz>&limit=<int>`
+- auth: service token + `events:read`
+- `limit`: default `50`, max `200`
+- `since`: optional; filter `created_at > since`
+- sort: `created_at ASC`
+- 200:
+```json
+{
+  "events": [
+    {
+      "id": "uuid",
+      "type": "agent_action",
+      "task_id": "uuid",
+      "project_id": "uuid",
+      "created_at": "timestamp",
+      "meta": {}
+    }
+  ]
+}
+```
+- errors: `400 invalid_payload`, `401 unauthorized`, `403 forbidden`, `500 internal_error`.
+
+PowerShell (`curl.exe`) events example:
+```powershell
+$serviceToken = "PASTE_SERVICE_TOKEN"
+curl.exe -sS "http://localhost:3000/api/events?limit=50" `
+  -H "x-service-token: $serviceToken"
+```
+
+PowerShell (`Invoke-RestMethod`) events example:
+```powershell
+$serviceToken = "PASTE_SERVICE_TOKEN"
+Invoke-RestMethod -Method Get `
+  -Uri "http://localhost:3000/api/events?since=2026-03-05T00:00:00Z&limit=50" `
+  -Headers @{ "x-service-token" = $serviceToken }
 ```

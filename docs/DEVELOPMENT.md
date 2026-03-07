@@ -20,7 +20,6 @@
 - ручные тесты по чек-листу в `AGENTS.md`
 - обновить `docs/API.md` и `docs/DATABASE.md` если менялись контракты/схема
 
-
 ## Local run (updated)
 1) `npm install` in repo root
 2) `npm run dev` (API + static web on :3000)
@@ -107,3 +106,21 @@ Stop local services:
    - `docker compose exec db psql -U kanban -d kanban -c "select id, purpose, provider, model, status, error_code, response_meta, created_at from llm_requests order by created_at desc limit 5;"`
 4) Verify RBAC restrictions for employee:
    - employee call with `purpose=new_task` or `purpose=import_parse` returns `403 forbidden`.
+
+## Agent integration local test
+1) Login as admin and save JWT:
+   - `curl.exe -sS -X POST "http://localhost:3000/auth/login" -H "Content-Type: application/json" --data "{\"email\":\"admin@local.dev\",\"password\":\"admin123\"}"`
+2) Create service account and save `token` (`x-service-token`):
+   - `curl.exe -sS -X POST "http://localhost:3000/api/service-accounts" -H "Authorization: Bearer <ADMIN_JWT>" -H "Content-Type: application/json" --data "{\"name\":\"Agent Runner\",\"scopes\":[\"tasks:read\",\"tasks:comment\",\"events:read\"]}"`
+3) Check agent context (`tasks:read`):
+   - `curl.exe -sS "http://localhost:3000/api/agent/context?task_id=<TASK_ID>" -H "x-service-token: <SERVICE_TOKEN>"`
+4) Check `task_comment` via gateway and verify audit row:
+   - `curl.exe -sS -X POST "http://localhost:3000/api/agent/actions" -H "x-service-token: <SERVICE_TOKEN>" -H "Content-Type: application/json" --data "{\"idempotency_key\":\"agent-demo-1\",\"agent\":{\"name\":\"codex\",\"role\":\"executor\"},\"actions\":[{\"type\":\"task_comment\",\"payload\":{\"task_id\":\"<TASK_ID>\",\"text\":\"Agent test comment\",\"format\":\"text\"}}]}"`
+   - verify in DB:
+   - `docker compose exec db psql -U kanban -d kanban -c "select id, event_type, task_id, payload, created_at from task_events order by created_at desc limit 5;"`
+5) Check scope enforcement for `task_move`:
+   - with service account without `tasks:move`, call `task_move` action and confirm `403 {"error":"forbidden"}`.
+6) Check idempotency:
+   - repeat the exact same `/api/agent/actions` request with identical `idempotency_key`; confirm same response and no duplicate `task_events`.
+7) Check events feed:
+   - `curl.exe -sS "http://localhost:3000/api/events?limit=20" -H "x-service-token: <SERVICE_TOKEN>"`
