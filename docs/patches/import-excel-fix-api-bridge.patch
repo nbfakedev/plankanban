@@ -1,0 +1,96 @@
+--- a/apps/web/frontend/js/api-bridge.js
++++ b/apps/web/frontend/js/api-bridge.js
+@@ -2506,12 +2506,15 @@
+ 
+     if (!response.ok) {
+       let errorCode = response.status + '';
++      let errorBody = null;
+       try {
+-        const errorBody = await response.json();
++        errorBody = await response.json();
+         if (errorBody && errorBody.error) {
+           errorCode = errorBody.error;
+         }
+       } catch (_) {
+         // ignore parse errors
+       }
+-      throw new Error(errorCode);
++      const err = new Error(errorCode);
++      if (errorBody) err.body = errorBody;
++      throw err;
+     }
+ 
+     if (response.status === 204) {
+@@ -4357,10 +4360,6 @@
+   let lastImportParsedData = null;
+   let importConfirmReadyAt = 0;
+ 
+-  function selectImportModel(contentLength) {
+-    if (contentLength > 15000) {
+-      return 'claude-haiku-4-5-20251001';
+-    }
+-    return 'claude-sonnet-4-20250514';
+-  }
+-
+   function buildImportPrompt(content, createNew, currentProject) {
+     const projectContext =
+@@ -4405,7 +4404,7 @@
+ }
+ 
+ Текст для анализа:
+-` +
+-      content.substring(0, 12000)
++` +
++      content.substring(0, 20000)
+     );
+   }
+ 
+@@ -4663,9 +4662,13 @@
+     }
+ 
+     const bigHint = document.getElementById('imp-big-file-hint');
+-    if (bigHint) {
+-      bigHint.style.display = content.length > 15000 ? '' : 'none';
++    const MAX_CONTENT = 20000;
++    if (bigHint) {
++      if (content.length > MAX_CONTENT) {
++        bigHint.textContent = 'Файл большой — будет обработано первые ~250 строк';
++        bigHint.style.display = '';
++        bigHint.style.color = 'var(--yellow)';
++      } else {
++        bigHint.style.display = 'none';
++      }
+     }
+ 
+     const parseButton = document.getElementById('imp-parse-btn');
+@@ -4674,7 +4677,7 @@
+     document.getElementById('imp-status').style.color = '';
+ 
+     try {
+-      let model = selectImportModel(content.length);
++      let model = 'claude-sonnet-4-20250514';
+       try {
+         const settingsRes = await apiFetch('/api/llm/provider-settings');
+         const settings = Array.isArray(settingsRes && settingsRes.settings) ? settingsRes.settings : [];
+@@ -4704,7 +4707,20 @@
+       openImportConfirmModal(parsed);
+     } catch (error) {
+       parseButton.textContent = 'Готово';
+-      document.getElementById('imp-status').textContent =
+-        'Ошибка: ' + (error.message || 'Проверьте доступ к LLM');
++      const statusEl = document.getElementById('imp-status');
++      if (error.body && error.body.error === 'empty_import') {
++        const hint = error.body.hint;
++        const msg = hint === 'llm_parse_failed'
++          ? 'LLM не смогла распознать структуру файла. Попробуй уменьшить файл или описать задачи текстом.'
++          : 'Задачи не найдены в файле.';
++        statusEl.textContent = msg;
++      } else if (error.message === 'Не удалось разобрать ответ LLM') {
++        statusEl.textContent = 'LLM не смогла распознать структуру файла. Попробуй уменьшить файл или описать задачи текстом.';
++      } else {
++        statusEl.textContent =
++          'Ошибка: ' + (error.message || 'Проверьте доступ к LLM');
++      }
+      document.getElementById('imp-status').style.color = 'var(--red)';
+     } finally {
+       parseButton.disabled = false;

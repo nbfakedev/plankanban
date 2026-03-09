@@ -2,31 +2,42 @@ const crypto = require('crypto');
 const path = require('path');
 const express = require('express');
 const { Pool } = require('pg');
-const { verifyPassword } = require('./lib/password');
+const { verifyPassword, hashPassword } = require('./lib/password');
 const {
   createDbConfigFromEnv,
   createDbConnectionInfo,
 } = require('./lib/db-config');
+const {
+  fetchAndStoreLlmPrices,
+  loadPricingCache,
+  getPriceFromCache,
+  getFallbackPrice,
+} = require('./lib/llm-pricing');
 
 const PORT = Number(process.env.PORT) || 3000;
 const webRoot = path.resolve(__dirname, '..', 'web');
-const MAX_JSON_BODY = '1mb';
-const ALL_ROLES = ['admin', 'techlead', 'employee'];
+const MAX_JSON_BODY = '5mb';
+const ALL_ROLES = ['admin', 'techlead', 'manager', 'employee'];
 const PROJECT_WRITE_ROLES = ['admin', 'techlead'];
 const TASK_WRITE_ROLES = ['admin', 'techlead'];
+const ADMIN_ONLY = ['admin'];
+const LLM_ROLES = ['admin', 'techlead'];
+const TRASH_LIST_ROLES = ['admin', 'techlead', 'manager'];
+const EVENTS_LIST_ROLES = ['admin', 'techlead', 'manager'];
 const TASK_COLUMNS = ['backlog', 'todo', 'doing', 'review', 'done'];
 const TASK_TRASH_LIST_DEFAULT_LIMIT = 100;
 const TASK_TRASH_LIST_MAX_LIMIT = 500;
 const TASK_COLUMN_ALIASES = {
   backlog: 'backlog',
   todo: 'todo',
+  'to do': 'todo',
   doing: 'doing',
   inprogress: 'doing',
   in_progress: 'doing',
+  'in progress': 'doing',
   review: 'review',
   done: 'done',
 };
-const DEFAULT_PROJECT_STAGES = ['A', 'R1', 'R1.1', 'R2', 'R3+', 'F'];
 const DEFAULT_STAGE_COLOR_PALETTE = [
   '#4a9eff',
   '#a78bfa',
@@ -88,19 +99,107 @@ const CLOUDFLARE_WORKER_URL = normalizeNullableString(
 const WORKER_SHARED_SECRET = normalizeNullableString(
   process.env.WORKER_SHARED_SECRET || process.env.CF_WORKER_SECRET
 );
-const ANTHROPIC_API_KEY = normalizeNullableString(process.env.ANTHROPIC_API_KEY);
+const ANTHROPIC_API_KEY_RAW = normalizeNullableString(process.env.ANTHROPIC_API_KEY);
+const LLM_KEY_PLACEHOLDERS = /^(change_me|your[_-]?key|sk-ant-placeholder|sk-proj-placeholder)$/i;
+const ANTHROPIC_API_KEY = (ANTHROPIC_API_KEY_RAW && !LLM_KEY_PLACEHOLDERS.test(ANTHROPIC_API_KEY_RAW.trim()))
+  ? ANTHROPIC_API_KEY_RAW
+  : null;
 const ANTHROPIC_API_VERSION = '2023-06-01';
 const ANTHROPIC_DEFAULT_MAX_TOKENS = 1024;
-const ANTHROPIC_DEFAULT_MODELS = ['claude-sonnet-4', 'claude-3-5-sonnet-latest'];
+const ANTHROPIC_DEFAULT_MODELS = [
+  'claude-sonnet-4-6',
+  'claude-sonnet-4',
+  'claude-sonnet-4-20250514',
+  'claude-haiku-4-5-20251001',
+  'claude-3-5-sonnet-latest',
+];
 const ANTHROPIC_ALLOWED_MODELS = (() => {
   const parsed = parseCsvList(process.env.LLM_ALLOWED_MODELS_ANTHROPIC);
   return parsed.length > 0 ? parsed : ANTHROPIC_DEFAULT_MODELS;
 })();
+
+/** Единый список всех поддерживаемых LLM-провайдеров (в т.ч. для настроек и отчётов). */
+const ALL_LLM_PROVIDERS = [
+  'anthropic',
+  'openai',
+  'deepseek',
+  'groq',
+  'qwen',
+  'google',
+  'custom',
+];
+
+/** Провайдеры с OpenAI-совместимым API (не Anthropic). */
+const OPENAI_COMPATIBLE_PROVIDERS = [
+  'openai',
+  'deepseek',
+  'groq',
+  'qwen',
+  'google',
+  'custom',
+];
+
+const OPENAI_DEFAULT_MODELS = [
+  'gpt-4o',
+  'gpt-4o-mini',
+  'gpt-4-turbo',
+  'gpt-4',
+  'gpt-3.5-turbo',
+];
+const DEEPSEEK_DEFAULT_MODELS = ['deepseek-chat', 'deepseek-coder'];
+const GROQ_DEFAULT_MODELS = [
+  'llama-3.1-8b-instant',
+  'llama-3.1-70b-versatile',
+  'mixtral-8x7b-32768',
+];
+const QWEN_DEFAULT_MODELS = ['qwen-turbo', 'qwen-plus', 'qwen-max'];
+const GOOGLE_DEFAULT_MODELS = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.0-pro'];
+
 const llmRateLimitBuckets = new Map();
 const dbConfigState = createDbConfigFromEnv(process.env);
 const dbConfig = dbConfigState.config;
 const dbConnectionInfo = createDbConnectionInfo(dbConfig);
 const db = new Pool(dbConfig);
+
+const LLM_USER_KEYS_SECRET =
+  normalizeNullableString(process.env.LLM_USER_KEYS_ENCRYPTION_SECRET) ||
+  normalizeNullableString(process.env.JWT_SECRET) ||
+  '';
+
+function encryptLlmUserKey(plainText) {
+  if (!plainText || typeof plainText !== 'string') return null;
+  if (!LLM_USER_KEYS_SECRET) return null;
+  try {
+    const crypto = require('crypto');
+    const iv = crypto.randomBytes(16);
+    const key = crypto.scryptSync(LLM_USER_KEYS_SECRET, 'salt', 32);
+    const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+    let encrypted = cipher.update(plainText, 'utf8', 'base64');
+    encrypted += cipher.final('base64');
+    return iv.toString('base64') + ':' + encrypted;
+  } catch (e) {
+    return null;
+  }
+}
+
+function decryptLlmUserKey(cipherText) {
+  if (!cipherText || typeof cipherText !== 'string') return null;
+  if (!LLM_USER_KEYS_SECRET) return null;
+  try {
+    const crypto = require('crypto');
+    const parts = cipherText.split(':');
+    if (parts.length < 2) return null;
+    const iv = Buffer.from(parts[0], 'base64');
+    const encrypted = parts.slice(1).join(':');
+    const key = crypto.scryptSync(LLM_USER_KEYS_SECRET, 'salt', 32);
+    const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+    let decrypted = decipher.update(encrypted, 'base64', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (e) {
+    return null;
+  }
+}
 
 const app = express();
 
@@ -135,10 +234,13 @@ async function runInTransaction(work) {
   }
 }
 
-function createAppError(statusCode, errorCode) {
+function createAppError(statusCode, errorCode, meta) {
   const error = new Error(errorCode);
   error.statusCode = statusCode;
   error.errorCode = errorCode;
+  if (meta && typeof meta === 'object' && meta.hint) {
+    error.hint = meta.hint;
+  }
   return error;
 }
 
@@ -170,10 +272,32 @@ function parseCsvList(rawValue) {
 }
 
 function getLlmAllowedModels(provider) {
-  if (provider === 'anthropic') {
-    return ANTHROPIC_ALLOWED_MODELS;
+  const p = (provider || '').toLowerCase();
+  switch (p) {
+    case 'anthropic':
+      return ANTHROPIC_ALLOWED_MODELS;
+    case 'openai':
+      return OPENAI_DEFAULT_MODELS;
+    case 'deepseek':
+      return DEEPSEEK_DEFAULT_MODELS;
+    case 'groq':
+      return GROQ_DEFAULT_MODELS;
+    case 'qwen':
+      return QWEN_DEFAULT_MODELS;
+    case 'google':
+      return GOOGLE_DEFAULT_MODELS;
+    case 'custom':
+      return ['custom'];
+    default:
+      return [];
   }
-  return [];
+}
+
+function isOpenAiCompatibleProvider(provider) {
+  return (
+    provider &&
+    OPENAI_COMPATIBLE_PROVIDERS.includes(String(provider).toLowerCase())
+  );
 }
 
 function consumeLlmRateLimit(userId) {
@@ -297,18 +421,120 @@ function resolveLlmProviderAndModel(parsedPayload) {
   const provider = (
     parsedPayload.provider || LLM_DEFAULT_PROVIDER || 'anthropic'
   ).toLowerCase();
-  const model = parsedPayload.model || LLM_DEFAULT_MODEL;
+  const model = (parsedPayload.model || LLM_DEFAULT_MODEL || '').trim();
 
   if (!provider || !model) {
     return { error: 'invalid_payload' };
   }
 
   const allowedModels = getLlmAllowedModels(provider);
-  if (allowedModels.length === 0 || !allowedModels.includes(model)) {
+  const allowed =
+    allowedModels.length > 0 &&
+    (allowedModels.includes(model) ||
+      (isOpenAiCompatibleProvider(provider) && model));
+  if (!allowed) {
     return { error: 'invalid_payload' };
   }
 
   return { value: { provider, model } };
+}
+
+const LLM_PROVIDER_SETTINGS_PURPOSES = ['import_parse', 'new_task', 'chat'];
+const LLM_PROVIDER_SETTINGS_PROVIDERS = ALL_LLM_PROVIDERS;
+
+function parseProviderSettingPayload(payload, forUpdate) {
+  if (!isObjectPayload(payload)) return { error: 'invalid_payload' };
+  const purpose =
+    typeof payload.purpose === 'string' ? payload.purpose.trim() : '';
+  if (!LLM_PROVIDER_SETTINGS_PURPOSES.includes(purpose))
+    return { error: 'invalid_payload' };
+  const provider =
+    typeof payload.provider === 'string'
+      ? payload.provider.trim().toLowerCase()
+      : '';
+  if (!LLM_PROVIDER_SETTINGS_PROVIDERS.includes(provider))
+    return { error: 'invalid_payload' };
+  const model = typeof payload.model === 'string' ? payload.model.trim() : '';
+  if (!model) return { error: 'invalid_payload' };
+  const apiKey =
+    typeof payload.api_key === 'string' ? payload.api_key.trim() : null;
+  const baseUrl =
+    typeof payload.base_url === 'string' ? payload.base_url.trim() || null : null;
+  const isEnabled =
+    payload.is_enabled !== undefined ? Boolean(payload.is_enabled) : true;
+  const isIndividualOverride =
+    payload.is_individual_override === true;
+  return {
+    value: {
+      purpose,
+      provider,
+      model,
+      api_key: apiKey,
+      base_url: baseUrl,
+      is_enabled: isEnabled,
+      is_individual_override: isIndividualOverride,
+    },
+  };
+}
+
+async function getLlmBaseConfigForUser(userId) {
+  try {
+    const result = await db.query(
+      `SELECT id, purpose, provider, model, api_key_encrypted, base_url
+       FROM llm_provider_settings
+       WHERE user_id = $1 AND is_enabled = true
+         AND (is_individual_override = false OR is_individual_override IS NULL)
+       ORDER BY CASE purpose WHEN 'import_parse' THEN 1 WHEN 'new_task' THEN 2 WHEN 'chat' THEN 3 END
+       LIMIT 1`,
+      [userId]
+    );
+    const row = result.rows[0];
+    if (!row) {
+      const fallback = await db.query(
+        `SELECT id, purpose, provider, model, api_key_encrypted, base_url
+         FROM llm_provider_settings WHERE user_id = $1 AND is_enabled = true
+         ORDER BY purpose LIMIT 1`,
+        [userId]
+      );
+      const r = fallback.rows[0];
+      if (!r) return null;
+      const apiKey = r.api_key_encrypted ? decryptLlmUserKey(r.api_key_encrypted) : null;
+      return { id: r.id, purpose: r.purpose, provider: r.provider, model: r.model, api_key: apiKey, base_url: r.base_url };
+    }
+    const apiKey = row.api_key_encrypted ? decryptLlmUserKey(row.api_key_encrypted) : null;
+    return { id: row.id, purpose: row.purpose, provider: row.provider, model: row.model, api_key: apiKey, base_url: row.base_url };
+  } catch (e) {
+    return null;
+  }
+}
+
+async function getLlmUserSettingForPurpose(userId, purpose) {
+  try {
+    const result = await db.query(
+      `SELECT id, purpose, provider, model, api_key_encrypted, base_url, is_enabled
+       FROM llm_provider_settings
+       WHERE user_id = $1 AND purpose = $2 AND is_enabled = true`,
+      [userId, purpose]
+    );
+    const row = result.rows[0];
+    if (row) {
+      const apiKey = row.api_key_encrypted
+        ? decryptLlmUserKey(row.api_key_encrypted)
+        : null;
+      return {
+        id: row.id,
+        purpose: row.purpose,
+        provider: row.provider,
+        model: row.model,
+        api_key: apiKey,
+        base_url: row.base_url,
+      };
+    }
+    const baseConfig = await getLlmBaseConfigForUser(userId);
+    return baseConfig;
+  } catch (e) {
+    return null;
+  }
 }
 
 function buildAnthropicRequest(parsedPayload, resolvedModel) {
@@ -332,13 +558,11 @@ function buildAnthropicRequest(parsedPayload, resolvedModel) {
   }
 
   const params = parsedPayload.params || {};
+  const maxVal = params.max_tokens !== undefined ? params.max_tokens : ANTHROPIC_DEFAULT_MAX_TOKENS;
   const body = {
     model: resolvedModel,
     messages: requestMessages,
-    max_tokens:
-      params.max_tokens !== undefined
-        ? params.max_tokens
-        : ANTHROPIC_DEFAULT_MAX_TOKENS,
+    max_completion_tokens: maxVal,
   };
 
   if (params.temperature !== undefined) {
@@ -405,6 +629,29 @@ function isPurposeAllowedForUser(user, purpose) {
   return LLM_PURPOSES.includes(purpose);
 }
 
+let llmPricingCache = new Map();
+
+function estimateLlmCostUsd(provider, model, inputTokens, outputTokens) {
+  if (
+    !Number.isInteger(inputTokens) ||
+    !Number.isInteger(outputTokens) ||
+    (inputTokens <= 0 && outputTokens <= 0)
+  ) {
+    return null;
+  }
+  const inM = (inputTokens || 0) / 1e6;
+  const outM = (outputTokens || 0) / 1e6;
+  let price = getPriceFromCache(llmPricingCache, provider, model);
+  if (!price) {
+    price = getFallbackPrice(provider, model);
+  }
+  if (!price || !Number.isFinite(price.input) || !Number.isFinite(price.output)) {
+    return null;
+  }
+  const cost = inM * price.input + outM * price.output;
+  return cost > 0 ? Math.round(cost * 1e8) / 1e8 : null;
+}
+
 async function writeLlmRequest(params, executor = db) {
   const result = await executor.query(
     `
@@ -444,15 +691,19 @@ async function writeLlmRequest(params, executor = db) {
   return result.rows[0].id;
 }
 
-async function sendAnthropicRequest(body) {
-  const workerUsed = Boolean(CLOUDFLARE_WORKER_URL);
-  const endpoint = workerUsed
-    ? `${CLOUDFLARE_WORKER_URL.replace(/\/+$/, '')}/v1/messages`
-    : 'https://api.anthropic.com/v1/messages';
+async function sendAnthropicRequest(body, options) {
+  const apiKey = (options && options.apiKey) || ANTHROPIC_API_KEY;
+  const baseUrlOverride = options && options.baseUrl;
+  const workerUsed = Boolean(CLOUDFLARE_WORKER_URL && !baseUrlOverride);
+  const endpoint = baseUrlOverride
+    ? `${String(baseUrlOverride).replace(/\/+$/, '')}/v1/messages`
+    : workerUsed
+      ? `${CLOUDFLARE_WORKER_URL.replace(/\/+$/, '')}/v1/messages`
+      : 'https://api.anthropic.com/v1/messages';
 
   const headers = {
     'content-type': 'application/json',
-    'x-api-key': ANTHROPIC_API_KEY,
+    'x-api-key': apiKey,
   };
 
   if (workerUsed) {
@@ -464,27 +715,190 @@ async function sendAnthropicRequest(body) {
   const controller = new AbortController();
   const timeout = setTimeout(() => {
     controller.abort();
-  }, 30000);
+  }, 60000);
 
+  const maxAttempts = 3;
+  const delayMs = 2000;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log('[Anthropic] endpoint:', endpoint, attempt > 1 ? `(attempt ${attempt}/${maxAttempts})` : '');
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        clearTimeout(timeout);
+        const responseBody = await readJsonSafely(response);
+        throw createAppError(
+          response.status >= 500 ? 502 : 400,
+          'llm_unavailable',
+          { hint: 'provider_error', status: response.status, body: responseBody }
+        );
+      }
+
+      const responseBody = await readJsonSafely(response);
+      clearTimeout(timeout);
+      return {
+        workerUsed,
+        statusCode: response.status,
+        ok: response.ok,
+        body: responseBody,
+      };
+    } catch (error) {
+      lastError = error;
+      if (isAppError(error) && (error.statusCode === 400 || error.statusCode === 502)) {
+        clearTimeout(timeout);
+        throw error;
+      }
+      if (attempt < maxAttempts) {
+        console.warn('[Anthropic] attempt', attempt, 'failed:', error.message, '- retrying in', delayMs, 'ms');
+        await new Promise((r) => setTimeout(r, delayMs));
+      } else {
+        clearTimeout(timeout);
+        console.error('[Anthropic] request failed after', maxAttempts, 'attempts:', error.message, error.code || '');
+        if (process.env.NODE_ENV === 'development' && error.stack) {
+          console.error(error.stack);
+        }
+        throw createAppError(502, 'llm_unavailable', { hint: 'request_failed' });
+      }
+    }
+  }
+
+  clearTimeout(timeout);
+  throw createAppError(502, 'llm_unavailable', { hint: 'request_failed' });
+}
+
+function getOpenAiCompatibleBaseUrl(provider, userSetting) {
+  const override = userSetting && userSetting.base_url && userSetting.base_url.trim();
+  if (override) return override.replace(/\/+$/, '');
+  const p = (provider || '').toLowerCase();
+  switch (p) {
+    case 'openai':
+      return 'https://api.openai.com';
+    case 'deepseek':
+      return 'https://api.deepseek.com';
+    case 'groq':
+      return 'https://api.groq.com/openai/v1';
+    case 'qwen':
+      return 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+    case 'google':
+      return null;
+    case 'custom':
+      return null;
+    default:
+      return null;
+  }
+}
+
+async function sendOpenAiCompatibleChat(parsedPayload, resolved, userSetting) {
+  const apiKey = userSetting && userSetting.api_key && userSetting.api_key.trim();
+  if (!apiKey) {
+    return { error: 'missing_api_key', statusCode: 502 };
+  }
+
+  const baseUrl = getOpenAiCompatibleBaseUrl(resolved.provider, userSetting);
+  if (!baseUrl) {
+    return { error: 'invalid_provider_config', statusCode: 400 };
+  }
+
+  const messages = [];
+  for (const m of parsedPayload.messages || []) {
+    if (m.role === 'system') {
+      messages.push({ role: 'system', content: m.content || '' });
+      continue;
+    }
+    messages.push({ role: m.role, content: m.content || '' });
+  }
+  if (messages.length === 0) {
+    return { error: 'invalid_payload', statusCode: 400 };
+  }
+
+  const params = parsedPayload.params || {};
+  const maxVal = params.max_tokens !== undefined ? params.max_tokens : 1024;
+  const body = {
+    model: resolved.model,
+    messages,
+    max_completion_tokens: maxVal,
+  };
+  if (params.temperature !== undefined) body.temperature = params.temperature;
+
+  const url = `${baseUrl}/v1/chat/completions`;
+  const headers = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${apiKey}`,
+  };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
   try {
-    const response = await fetch(endpoint, {
+    const res = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
       signal: controller.signal,
     });
-    const responseBody = await readJsonSafely(response);
+    clearTimeout(timeout);
+    const responseBody = await readJsonSafely(res);
+
+    if (!res.ok) {
+      const errMsg =
+        (responseBody && (responseBody.error && responseBody.error.message)) ||
+        responseBody ||
+        res.statusText;
+      return {
+        error: typeof errMsg === 'string' ? errMsg : 'provider_error',
+        statusCode: res.status,
+      };
+    }
+
+    const text =
+      responseBody &&
+      responseBody.choices &&
+      responseBody.choices[0] &&
+      responseBody.choices[0].message &&
+      typeof responseBody.choices[0].message.content === 'string'
+        ? responseBody.choices[0].message.content
+        : '';
+    const usage = responseBody && responseBody.usage ? responseBody.usage : {};
+    const inputTokens =
+      typeof usage.prompt_tokens === 'number'
+        ? usage.prompt_tokens
+        : typeof usage.input_tokens === 'number'
+          ? usage.input_tokens
+          : null;
+    const outputTokens =
+      typeof usage.completion_tokens === 'number'
+        ? usage.completion_tokens
+        : typeof usage.output_tokens === 'number'
+          ? usage.output_tokens
+          : null;
+    const finishReason =
+      responseBody &&
+      responseBody.choices &&
+      responseBody.choices[0] &&
+      responseBody.choices[0].finish_reason;
+    const responseId = responseBody && responseBody.id ? responseBody.id : null;
 
     return {
-      workerUsed,
-      statusCode: response.status,
-      ok: response.ok,
-      body: responseBody,
+      text,
+      inputTokens,
+      outputTokens,
+      statusCode: res.status,
+      responseId,
+      stopReason: finishReason || null,
     };
-  } catch (error) {
-    throw createAppError(502, 'llm_unavailable');
-  } finally {
+  } catch (err) {
     clearTimeout(timeout);
+    console.error('[OpenAI-compatible] request failed:', err.message);
+    return {
+      error: err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'request_failed',
+      statusCode: 502,
+    };
   }
 }
 
@@ -553,21 +967,17 @@ function ensureTaskDialogShape(value) {
   };
 }
 
-function buildFallbackDialogTask(messages) {
+function buildFallbackDialogTask(messages, firstProjectStage) {
   const lastUserMessage = [...messages]
     .reverse()
     .find((message) => message.role === 'user');
   const source = lastUserMessage ? lastUserMessage.content.trim() : '';
   const baseTitle = source ? source.split('\n')[0].slice(0, 80) : 'Новая задача';
   const lowered = source.toLowerCase();
-
-  let stage = 'A';
-  if (/(mvp|todo|реализац|фич|backend|frontend)/i.test(lowered)) {
-    stage = 'R1';
-  }
-  if (/(запуск|релиз|production|prod)/i.test(lowered)) {
-    stage = 'F';
-  }
+  const stage =
+    typeof firstProjectStage === 'string' && firstProjectStage.trim()
+      ? firstProjectStage.trim()
+      : '';
 
   let priority = 2;
   if (/(крит|сроч|urgent|asap|блокер)/i.test(lowered)) {
@@ -604,7 +1014,7 @@ function normalizeImportedTasks(candidate) {
     const stage =
       typeof item.stage === 'string' && item.stage.trim()
         ? item.stage.trim()
-        : 'A';
+        : '';
     const description =
       typeof item.description === 'string'
         ? item.description.trim()
@@ -613,10 +1023,45 @@ function normalizeImportedTasks(candidate) {
         : '';
     const notes =
       typeof item.notes === 'string' ? item.notes.trim() : null;
+    const size =
+      typeof item.size === 'string' && item.size.trim() && ['XS', 'S', 'M', 'L', 'XL'].includes(String(item.size).trim().toUpperCase())
+        ? String(item.size).trim().toUpperCase()
+        : null;
     const release =
       typeof item.release === 'string' ? item.release.trim() : null;
-    const priority =
-      Number.isInteger(item.priority) ? item.priority : 0;
+    // priority: 1=low, 2=mid, 3=high, 4=critical. Поддержка EN и RU из документа. Не распознано → 2 (medium).
+    let priority = 2;
+    if (Number.isInteger(item.priority) && item.priority >= 1 && item.priority <= 4) {
+      priority = item.priority;
+    } else if (typeof item.priority === 'string' && item.priority.trim()) {
+      const key = item.priority.trim().toLowerCase().replace(/\s+/g, ' ');
+      const map = {
+        low: 1, mid: 2, medium: 2, high: 3, critical: 4,
+        низкий: 1, средний: 2, высокий: 3, критический: 4,
+        'низкий приоритет': 1, 'средний приоритет': 2, 'высокий приоритет': 3, 'критический приоритет': 4,
+      };
+      const firstWord = (key.split(/\s/)[0] || '').toLowerCase();
+      const parsed = map[key] != null ? map[key] : (firstWord && map[firstWord] != null ? map[firstWord] : null);
+      if (parsed != null) priority = parsed;
+    }
+    // hours — затраченное/планируемое время (часы). size — объём задачи (XS/S/M/L/XL), отдельно; не конвертируем.
+    let hours = null;
+    if (Number.isFinite(item.hours) && item.hours >= 0) {
+      hours = item.hours;
+    }
+    // deps: строка "id1,id2", массив или объект — нормализуем в объект для JSONB
+    let deps = null;
+    if (item.deps != null) {
+      if (typeof item.deps === 'string' && item.deps.trim()) {
+        const ids = item.deps.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+        deps = ids.length ? { blocks: ids } : null;
+      } else if (Array.isArray(item.deps)) {
+        const ids = item.deps.filter((x) => typeof x === 'string' && x.trim()).map((x) => String(x).trim());
+        deps = ids.length ? { blocks: ids } : null;
+      } else if (typeof item.deps === 'object' && item.deps !== null && !Array.isArray(item.deps)) {
+        deps = item.deps;
+      }
+    }
 
     tasks.push({
       title,
@@ -625,6 +1070,9 @@ function normalizeImportedTasks(candidate) {
       notes,
       release,
       priority,
+      hours,
+      size,
+      deps,
     });
   }
 
@@ -644,7 +1092,7 @@ function fallbackImportTasksFromContent(content) {
     }
     tasks.push({
       title: line.slice(0, 140),
-      stage: 'A',
+      stage: '',
       description: line,
       notes: null,
       release: null,
@@ -744,16 +1192,23 @@ async function requestLlmText(params) {
     },
   };
 
-  const resolved = resolveLlmProviderAndModel(payload);
-  if (resolved.error || resolved.value.provider !== 'anthropic') {
+  let resolved = null;
+  const userSetting = await getLlmUserSettingForPurpose(params.user.id, params.purpose);
+  if (userSetting && userSetting.model) {
+    const prov = (userSetting.provider || '').toLowerCase();
+    const hasKey = userSetting.api_key || (prov === 'anthropic' && ANTHROPIC_API_KEY);
+    if (hasKey) {
+      resolved = { value: { provider: prov, model: userSetting.model } };
+    }
+  }
+  if (!resolved) {
+    resolved = resolveLlmProviderAndModel(payload);
+  }
+  if (resolved.error) {
     throw createAppError(400, 'invalid_payload');
   }
 
-  const anthropicRequest = buildAnthropicRequest(payload, resolved.value.model);
-  if (anthropicRequest.error) {
-    throw createAppError(400, anthropicRequest.error);
-  }
-
+  const provider = resolved.value.provider;
   const startedAt = Date.now();
   const requestMeta = {
     ...getLlmMessageMeta(payload.messages),
@@ -761,15 +1216,76 @@ async function requestLlmText(params) {
     worker_used: Boolean(CLOUDFLARE_WORKER_URL),
   };
 
-  if (!ANTHROPIC_API_KEY) {
-    const status = LLM_STUB_MODE ? 'ok' : 'error';
-    const errorCode = LLM_STUB_MODE ? null : 'missing_api_key';
-
+  if (provider !== 'anthropic') {
+    const openAiResult = await sendOpenAiCompatibleChat(payload, resolved.value, userSetting);
+    if (openAiResult.error) {
+      await writeLlmRequest({
+        projectId: payload.project_id,
+        actorUserId: params.user.id,
+        purpose: params.purpose,
+        provider,
+        model: resolved.value.model,
+        requestMeta,
+        responseMeta: {
+          worker_used: false,
+          latency_ms: Date.now() - startedAt,
+          provider_http_status: openAiResult.statusCode || null,
+          response_id: null,
+          stop_reason: null,
+        },
+        inputTokens: null,
+        outputTokens: null,
+        costEstimateUsd: null,
+        status: 'error',
+        errorCode: 'provider_request_failed',
+      });
+      throw createAppError(openAiResult.statusCode || 502, 'llm_unavailable');
+    }
+    const inputTokens = openAiResult.inputTokens;
+    const outputTokens = openAiResult.outputTokens;
+    const costEstimateUsd = estimateLlmCostUsd(
+      provider,
+      resolved.value.model,
+      inputTokens,
+      outputTokens
+    );
     await writeLlmRequest({
       projectId: payload.project_id,
       actorUserId: params.user.id,
       purpose: params.purpose,
-      provider: resolved.value.provider,
+      provider,
+      model: resolved.value.model,
+      requestMeta,
+      responseMeta: {
+        worker_used: false,
+        latency_ms: Date.now() - startedAt,
+        provider_http_status: openAiResult.statusCode || 200,
+        response_id: openAiResult.responseId || null,
+        stop_reason: openAiResult.stopReason || null,
+      },
+      inputTokens: inputTokens ?? null,
+      outputTokens: outputTokens ?? null,
+      costEstimateUsd,
+      status: 'ok',
+      errorCode: null,
+    });
+    return openAiResult.text || '';
+  }
+
+  const anthropicRequest = buildAnthropicRequest(payload, resolved.value.model);
+  if (anthropicRequest.error) {
+    throw createAppError(400, anthropicRequest.error);
+  }
+
+  const apiKey = (userSetting && userSetting.api_key) || ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    const status = LLM_STUB_MODE ? 'ok' : 'error';
+    const errorCode = LLM_STUB_MODE ? null : 'missing_api_key';
+    await writeLlmRequest({
+      projectId: payload.project_id,
+      actorUserId: params.user.id,
+      purpose: params.purpose,
+      provider,
       model: resolved.value.model,
       requestMeta,
       responseMeta: {
@@ -786,21 +1302,17 @@ async function requestLlmText(params) {
       status,
       errorCode,
     });
-
-    if (LLM_STUB_MODE) {
-      return 'LLM_STUB_OK';
-    }
-
+    if (LLM_STUB_MODE) return 'LLM_STUB_OK';
     throw createAppError(502, 'llm_unavailable');
   }
 
-  const providerResult = await sendAnthropicRequest(anthropicRequest.value);
+  const providerResult = await sendAnthropicRequest(anthropicRequest.value, { apiKey });
   if (!providerResult.ok) {
     await writeLlmRequest({
       projectId: payload.project_id,
       actorUserId: params.user.id,
       purpose: params.purpose,
-      provider: resolved.value.provider,
+      provider,
       model: resolved.value.model,
       requestMeta,
       responseMeta: {
@@ -816,6 +1328,7 @@ async function requestLlmText(params) {
       status: 'error',
       errorCode: 'provider_request_failed',
     });
+    console.log('[Anthropic] non-ok response:', providerResult.statusCode, JSON.stringify(providerResult.body)?.substring(0, 300));
     throw createAppError(502, 'llm_unavailable');
   }
 
@@ -833,12 +1346,18 @@ async function requestLlmText(params) {
   )
     ? providerResult.body.usage.output_tokens
     : null;
+  const costEstimateUsd = estimateLlmCostUsd(
+    provider,
+    resolved.value.model,
+    inputTokens,
+    outputTokens
+  );
 
   await writeLlmRequest({
     projectId: payload.project_id,
     actorUserId: params.user.id,
     purpose: params.purpose,
-    provider: resolved.value.provider,
+    provider,
     model: resolved.value.model,
     requestMeta,
     responseMeta: {
@@ -857,7 +1376,7 @@ async function requestLlmText(params) {
     },
     inputTokens,
     outputTokens,
-    costEstimateUsd: null,
+    costEstimateUsd,
     status: 'ok',
     errorCode: null,
   });
@@ -1484,6 +2003,7 @@ function sanitizeTaskForAudit(task) {
     agent: task.agent,
     priority: task.priority,
     hours: task.hours,
+    size: task.size,
     descript: task.descript,
     notes: task.notes,
     deps: task.deps,
@@ -1497,8 +2017,11 @@ function normalizeProjectStages(rawStages) {
     return { value: undefined };
   }
 
-  if (!Array.isArray(rawStages) || rawStages.length === 0) {
+  if (!Array.isArray(rawStages)) {
     return { error: 'invalid_payload' };
+  }
+  if (rawStages.length === 0) {
+    return { value: [] };
   }
 
   const stages = [];
@@ -1536,7 +2059,7 @@ function isValidHexColor(value) {
 function buildDefaultStageSettings(stages, budgetTotal) {
   const stageList = Array.isArray(stages) && stages.length > 0
     ? stages
-    : DEFAULT_PROJECT_STAGES;
+    : [];
   const total = Number.isFinite(budgetTotal) ? Math.max(0, budgetTotal) : 0;
   const perStage = stageList.length > 0 ? Math.floor(total / stageList.length) : 0;
   let remainder = stageList.length > 0 ? total - perStage * stageList.length : 0;
@@ -1648,7 +2171,9 @@ function parseProjectCreatePayload(payload) {
   const stages =
     stageSettingsResult.value
       ? stageSettingsResult.value.map((item) => item.name)
-      : stagesResult.value || DEFAULT_PROJECT_STAGES;
+      : stagesResult.value !== undefined
+        ? stagesResult.value
+        : [];
 
   const stageSettings =
     stageSettingsResult.value ||
@@ -1661,6 +2186,17 @@ function parseProjectCreatePayload(payload) {
     ? stageSettingsBudgetTotal
     : budgetTotal;
 
+  let responsibleUserId = null;
+  if (payload.responsible_user_id !== undefined) {
+    if (payload.responsible_user_id === null) {
+      responsibleUserId = null;
+    } else if (typeof payload.responsible_user_id === 'string' && isUuid(payload.responsible_user_id)) {
+      responsibleUserId = payload.responsible_user_id;
+    } else {
+      return { error: 'invalid_payload' };
+    }
+  }
+
   return {
     value: {
       name,
@@ -1668,6 +2204,7 @@ function parseProjectCreatePayload(payload) {
       budget_total: resolvedBudgetTotal,
       stages,
       stage_settings: stageSettings,
+      responsible_user_id: responsibleUserId,
     },
   };
 }
@@ -1804,6 +2341,29 @@ function normalizeTaskColumn(col, status) {
   return { value: normalized };
 }
 
+const PRIORITY_LABELS_TO_NUM = {
+  low: 1,
+  mid: 2,
+  medium: 2,
+  high: 3,
+  critical: 4,
+};
+
+function normalizeChatActionForApply(action) {
+  if (!action || typeof action !== 'object' || Array.isArray(action)) {
+    return action;
+  }
+  const out = { ...action };
+  if (typeof out.priority === 'string') {
+    const key = out.priority.trim().toLowerCase();
+    const num = PRIORITY_LABELS_TO_NUM[key];
+    if (num !== undefined) {
+      out.priority = num;
+    }
+  }
+  return out;
+}
+
 function normalizeTaskDescriptField(payload) {
   if (!isObjectPayload(payload)) {
     return { value: undefined };
@@ -1903,6 +2463,16 @@ function parseTaskCreatePayload(payload) {
     updates.hours = payload.hours;
   }
 
+  if (payload.size !== undefined) {
+    if (payload.size !== null && typeof payload.size === 'string' && payload.size.trim()) {
+      const s = String(payload.size).trim().toUpperCase();
+      if (['XS', 'S', 'M', 'L', 'XL'].includes(s)) updates.size = s;
+      else updates.size = null;
+    } else {
+      updates.size = null;
+    }
+  }
+
   const descriptResult = normalizeTaskDescriptField(payload);
   if (descriptResult.error) {
     return descriptResult;
@@ -1991,6 +2561,16 @@ function parseTaskPatchPayload(payload) {
       return { error: 'invalid_payload' };
     }
     updates.hours = payload.hours;
+  }
+
+  if (payload.size !== undefined) {
+    if (payload.size !== null && typeof payload.size === 'string' && payload.size.trim()) {
+      const s = String(payload.size).trim().toUpperCase();
+      if (['XS', 'S', 'M', 'L', 'XL'].includes(s)) updates.size = s;
+      else updates.size = null;
+    } else {
+      updates.size = null;
+    }
   }
 
   const descriptResult = normalizeTaskDescriptField(payload);
@@ -2181,7 +2761,7 @@ function parseTaskTrashQuery(query) {
 async function findProjectById(projectId, executor = db) {
   const result = await executor.query(
     `
-      SELECT id, name, created_by, llm_provider, llm_model,
+      SELECT id, name, created_by, responsible_user_id, llm_provider, llm_model,
              duration_weeks, budget_total, stages, stage_settings,
              created_at, updated_at
       FROM projects
@@ -2197,7 +2777,7 @@ async function listVisibleProjectsForUser(user, executor = db) {
   if (user.role === 'employee') {
     const result = await executor.query(
       `
-        SELECT DISTINCT p.id, p.name, p.created_by, p.llm_provider, p.llm_model,
+        SELECT DISTINCT p.id, p.name, p.created_by, p.responsible_user_id, p.llm_provider, p.llm_model,
                p.duration_weeks, p.budget_total, p.stages, p.stage_settings,
                p.created_at, p.updated_at
         FROM projects p
@@ -2210,9 +2790,24 @@ async function listVisibleProjectsForUser(user, executor = db) {
     return result.rows;
   }
 
+  if (user.role === 'manager') {
+    const result = await executor.query(
+      `
+        SELECT id, name, created_by, responsible_user_id, llm_provider, llm_model,
+               duration_weeks, budget_total, stages, stage_settings,
+               created_at, updated_at
+        FROM projects
+        WHERE responsible_user_id = $1 OR created_by = $1
+        ORDER BY created_at DESC
+      `,
+      [user.id]
+    );
+    return result.rows;
+  }
+
   const result = await executor.query(
     `
-      SELECT id, name, created_by, llm_provider, llm_model,
+      SELECT id, name, created_by, responsible_user_id, llm_provider, llm_model,
              duration_weeks, budget_total, stages, stage_settings,
              created_at, updated_at
       FROM projects
@@ -2226,7 +2821,7 @@ async function findVisibleProjectById(projectId, user) {
   if (user.role === 'employee') {
     const result = await db.query(
       `
-        SELECT p.id, p.name, p.created_by, p.llm_provider, p.llm_model,
+        SELECT p.id, p.name, p.created_by, p.responsible_user_id, p.llm_provider, p.llm_model,
                p.duration_weeks, p.budget_total, p.stages, p.stage_settings,
                p.created_at, p.updated_at
         FROM projects p
@@ -2237,6 +2832,21 @@ async function findVisibleProjectById(projectId, user) {
             WHERE t.project_id = p.id
               AND t.assignee_user_id = $2
           )
+        LIMIT 1
+      `,
+      [projectId, user.id]
+    );
+    return result.rows[0] || null;
+  }
+
+  if (user.role === 'manager') {
+    const result = await db.query(
+      `
+        SELECT p.id, p.name, p.created_by, p.responsible_user_id, p.llm_provider, p.llm_model,
+               p.duration_weeks, p.budget_total, p.stages, p.stage_settings,
+               p.created_at, p.updated_at
+        FROM projects p
+        WHERE p.id = $1 AND (p.responsible_user_id = $2 OR p.created_by = $2)
         LIMIT 1
       `,
       [projectId, user.id]
@@ -2275,7 +2885,7 @@ async function setUserActiveProject(userId, projectId, executor = db) {
 async function findUserActiveProject(user, executor = db) {
   const result = await executor.query(
     `
-      SELECT p.id, p.name, p.created_by, p.llm_provider, p.llm_model,
+      SELECT p.id, p.name, p.created_by, p.responsible_user_id, p.llm_provider, p.llm_model,
              p.duration_weeks, p.budget_total, p.stages, p.stage_settings,
              p.created_at, p.updated_at
       FROM user_active_projects ap
@@ -2291,7 +2901,7 @@ async function findUserActiveProject(user, executor = db) {
   }
 
   const project = result.rows[0];
-  if (user.role !== 'employee') {
+  if (user.role === 'admin' || user.role === 'techlead') {
     return project;
   }
 
@@ -2319,7 +2929,7 @@ async function findTaskById(taskId, executor = db) {
   const result = await executor.query(
     `
       SELECT id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
-             priority, hours, descript, notes, deps, position, created_at, updated_at
+             priority, hours, size, descript, notes, deps, position, created_at, updated_at
       FROM tasks
       WHERE id = $1
       LIMIT 1
@@ -2347,7 +2957,7 @@ async function findTaskInTrashByTaskId(taskId, executor = db) {
   const result = await executor.query(
     `
       SELECT id, task_id, public_id, project_id, deleted_project_name, title, col, stage,
-             assignee_user_id, track, agent, priority, hours, descript, notes, deps,
+             assignee_user_id, track, agent, priority, hours, size, descript, notes, deps,
              deleted_at, deleted_by_user_id, created_at, updated_at
       FROM task_trash
       WHERE task_id = $1
@@ -2396,6 +3006,7 @@ async function ensureTaskTrashStorage(executor = db) {
       await executor.query(`ALTER TABLE task_trash ADD COLUMN IF NOT EXISTS agent TEXT`);
       await executor.query(`ALTER TABLE task_trash ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 0`);
       await executor.query(`ALTER TABLE task_trash ADD COLUMN IF NOT EXISTS hours NUMERIC`);
+      await executor.query(`ALTER TABLE task_trash ADD COLUMN IF NOT EXISTS size TEXT`);
       await executor.query(`ALTER TABLE task_trash ADD COLUMN IF NOT EXISTS descript TEXT`);
       await executor.query(`ALTER TABLE task_trash ADD COLUMN IF NOT EXISTS notes TEXT`);
       await executor.query(`ALTER TABLE task_trash ADD COLUMN IF NOT EXISTS deps JSONB`);
@@ -2487,7 +3098,7 @@ function normalizeProjectStageSettingsForUpdate(project) {
     };
   }
 
-  const fallback = stageList.length > 0 ? stageList : DEFAULT_PROJECT_STAGES;
+  const fallback = stageList.length > 0 ? stageList : [];
   return {
     stages: fallback,
     stage_settings: buildDefaultStageSettings(
@@ -2495,6 +3106,22 @@ function normalizeProjectStageSettingsForUpdate(project) {
       Number(project.budget_total || 0)
     ),
   };
+}
+
+const HOURS_PER_WEEK_FOR_DURATION = 9;
+
+async function recalculateProjectDuration(projectId, executor = db) {
+  const sumResult = await executor.query(
+    `SELECT COALESCE(SUM(hours::float), 0) AS total FROM tasks WHERE project_id = $1`,
+    [projectId]
+  );
+  const total = Number(sumResult.rows[0]?.total || 0);
+  const durationWeeks = total > 0 ? Math.ceil(total / HOURS_PER_WEEK_FOR_DURATION) : 0;
+  await executor.query(
+    `UPDATE projects SET duration_weeks = $1, updated_at = NOW() WHERE id = $2`,
+    [durationWeeks, projectId]
+  );
+  return durationWeeks;
 }
 
 async function ensureProjectStageExists(project, stageName, executor = db) {
@@ -2549,6 +3176,7 @@ async function moveTaskRowToTrash(taskRow, options = {}, executor = db) {
         agent,
         priority,
         hours,
+        size,
         descript,
         notes,
         deps,
@@ -2558,7 +3186,7 @@ async function moveTaskRowToTrash(taskRow, options = {}, executor = db) {
         updated_at
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), $16, $17, NOW()
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), $17, $18, NOW()
       )
       ON CONFLICT (task_id)
       DO UPDATE SET
@@ -2573,6 +3201,7 @@ async function moveTaskRowToTrash(taskRow, options = {}, executor = db) {
         agent = EXCLUDED.agent,
         priority = EXCLUDED.priority,
         hours = EXCLUDED.hours,
+        size = EXCLUDED.size,
         descript = EXCLUDED.descript,
         notes = EXCLUDED.notes,
         deps = EXCLUDED.deps,
@@ -2594,6 +3223,7 @@ async function moveTaskRowToTrash(taskRow, options = {}, executor = db) {
       taskRow.agent || null,
       Number.isFinite(Number(taskRow.priority)) ? Number(taskRow.priority) : 0,
       taskRow.hours !== undefined ? taskRow.hours : null,
+      taskRow.size && ['XS', 'S', 'M', 'L', 'XL'].includes(String(taskRow.size).toUpperCase()) ? String(taskRow.size).trim().toUpperCase() : null,
       taskRow.descript || null,
       taskRow.notes || null,
       taskRow.deps === undefined ? null : taskRow.deps,
@@ -2651,6 +3281,7 @@ function buildTaskUpdateStatement(updates) {
     agent: 'agent',
     priority: 'priority',
     hours: 'hours',
+    size: 'size',
     descript: 'descript',
     notes: 'notes',
     deps: 'deps',
@@ -2722,7 +3353,7 @@ async function touchTask(taskId, executor = db) {
       SET updated_at = NOW()
       WHERE id = $1
       RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
-                priority, hours, descript, notes, deps, created_at, updated_at
+                priority, hours, size, descript, notes, deps, created_at, updated_at
     `,
     [taskId]
   );
@@ -2849,7 +3480,7 @@ async function applyAgentTaskMove(context, payload, actionIndex, executor = db) 
       SET col = $1, updated_at = NOW()
       WHERE id = $2
       RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
-                priority, hours, descript, notes, deps, created_at, updated_at
+                priority, hours, size, descript, notes, deps, created_at, updated_at
     `,
     [payload.toStatus, payload.taskId]
   );
@@ -2897,7 +3528,7 @@ async function applyAgentTaskPatch(context, payload, actionIndex, executor = db)
       SET ${update.setClause}
       WHERE id = $${update.values.length + 1}
       RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
-                priority, hours, descript, notes, deps, created_at, updated_at
+                priority, hours, size, descript, notes, deps, created_at, updated_at
     `,
     [...update.values, payload.taskId]
   );
@@ -2949,15 +3580,16 @@ async function applyAgentTaskCreate(context, payload, actionIndex, executor = db
         agent,
         priority,
         hours,
+        size,
         descript,
         notes,
         deps
       )
       VALUES (
-        $1, $2, COALESCE($3, 'backlog'), $4, $5, $6, $7, COALESCE($8, 0), $9, $10, $11, $12
+        $1, $2, COALESCE($3, 'backlog'), $4, $5, $6, $7, COALESCE($8, 0), $9, $10, $11, $12, $13
       )
       RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
-                priority, hours, descript, notes, deps, created_at, updated_at
+                priority, hours, size, descript, notes, deps, created_at, updated_at
     `,
     [
       payload.projectId,
@@ -2969,6 +3601,7 @@ async function applyAgentTaskCreate(context, payload, actionIndex, executor = db
       payload.create.agent ?? null,
       payload.create.priority ?? null,
       payload.create.hours ?? null,
+      payload.create.size && ['XS','S','M','L','XL'].includes(String(payload.create.size).trim().toUpperCase()) ? String(payload.create.size).trim().toUpperCase() : null,
       payload.create.descript ?? null,
       payload.create.notes ?? null,
       payload.create.deps ?? null,
@@ -3003,6 +3636,17 @@ async function findUserByEmail(email) {
   const result = await db.query(
     'SELECT id, email, password_hash, role, status FROM users WHERE email = $1 LIMIT 1',
     [email]
+  );
+  return result.rows[0] || null;
+}
+
+async function findUserById(userId) {
+  if (!userId || !isUuid(userId)) {
+    return null;
+  }
+  const result = await db.query(
+    'SELECT id, email, role, status FROM users WHERE id = $1 LIMIT 1',
+    [userId]
   );
   return result.rows[0] || null;
 }
@@ -3286,18 +3930,27 @@ app.post('/projects', async (req, res) => {
     return;
   }
 
+  const responsibleUserId = parsed.value.responsible_user_id ?? user.id;
   try {
+    const userCheck = responsibleUserId
+      ? await db.query('SELECT id FROM users WHERE id = $1', [responsibleUserId])
+      : { rowCount: 0 };
+    if (responsibleUserId && userCheck.rowCount === 0) {
+      sendJson(res, 400, { error: 'invalid_user_id' });
+      return;
+    }
     const result = await db.query(
       `
-        INSERT INTO projects (name, created_by, duration_weeks, budget_total, stages, stage_settings)
-        VALUES ($1, $2, $3, $4, $5::text[], $6::jsonb)
-        RETURNING id, name, created_by, llm_provider, llm_model,
+        INSERT INTO projects (name, created_by, responsible_user_id, duration_weeks, budget_total, stages, stage_settings)
+        VALUES ($1, $2, $3, $4, $5, $6::text[], $7::jsonb)
+        RETURNING id, name, created_by, responsible_user_id, llm_provider, llm_model,
                   duration_weeks, budget_total, stages, stage_settings,
                   created_at, updated_at
       `,
       [
         parsed.value.name,
         user.id,
+        responsibleUserId || user.id,
         parsed.value.duration_weeks,
         parsed.value.budget_total,
         parsed.value.stages,
@@ -3483,7 +4136,7 @@ app.patch('/projects/:id', async (req, res) => {
             stage_settings = $5::jsonb,
             updated_at = NOW()
         WHERE id = $6
-        RETURNING id, name, created_by, llm_provider, llm_model,
+        RETURNING id, name, created_by, responsible_user_id, llm_provider, llm_model,
                   duration_weeks, budget_total, stages, stage_settings,
                   created_at, updated_at
       `,
@@ -3503,6 +4156,33 @@ app.patch('/projects/:id', async (req, res) => {
     if (isDevelopment() && error.stack) {
       console.error(error.stack);
     }
+    sendJson(res, 500, { error: 'projects_unavailable' });
+  }
+});
+
+app.post('/projects/:id/recalculate-duration', async (req, res) => {
+  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  if (!user) return;
+
+  const { id } = req.params;
+  if (!isUuid(id)) {
+    sendJson(res, 400, { error: 'invalid_project_id' });
+    return;
+  }
+
+  try {
+    const project = await findVisibleProjectById(id, user);
+    if (!project) {
+      sendJson(res, 404, { error: 'project_not_found' });
+      return;
+    }
+
+    const durationWeeks = await recalculateProjectDuration(id);
+    const updated = await findProjectById(id);
+    sendJson(res, 200, { duration_weeks: durationWeeks, project: updated });
+  } catch (error) {
+    console.error('POST /projects/:id/recalculate-duration failed:', error.message);
+    if (isDevelopment() && error.stack) console.error(error.stack);
     sendJson(res, 500, { error: 'projects_unavailable' });
   }
 });
@@ -3564,6 +4244,7 @@ app.delete('/projects/:id', async (req, res) => {
             agent,
             priority,
             hours,
+            size,
             descript,
             notes,
             deps,
@@ -3585,6 +4266,7 @@ app.delete('/projects/:id', async (req, res) => {
             t.agent,
             t.priority,
             t.hours,
+            t.size,
             t.descript,
             t.notes,
             t.deps,
@@ -3607,6 +4289,7 @@ app.delete('/projects/:id', async (req, res) => {
             agent = EXCLUDED.agent,
             priority = EXCLUDED.priority,
             hours = EXCLUDED.hours,
+            size = EXCLUDED.size,
             descript = EXCLUDED.descript,
             notes = EXCLUDED.notes,
             deps = EXCLUDED.deps,
@@ -3648,7 +4331,7 @@ app.delete('/projects/:id', async (req, res) => {
 });
 
 app.get('/projects/:projectId/events', async (req, res) => {
-  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  const user = requireAuth(req, res, EVENTS_LIST_ROLES);
   if (!user) {
     return;
   }
@@ -3680,22 +4363,58 @@ app.get('/projects/:projectId/events', async (req, res) => {
   }
 
   try {
-    const project = await findProjectById(projectId);
+    const project = await findVisibleProjectById(projectId, user);
     if (!project) {
       sendJson(res, 404, { error: 'project_not_found' });
       return;
     }
 
+    const where = ['te.project_id = $1'];
+    const values = [projectId];
+    if (user.role === 'manager') {
+      where.push(`te.actor_user_id = $${values.push(user.id)}`);
+    }
+
+    if (req.query.event_type) {
+      where.push(`te.event_type = $${values.push(req.query.event_type)}`);
+    }
+    if (req.query.from) {
+      const fromDate = new Date(req.query.from);
+      if (!isNaN(fromDate.getTime())) {
+        where.push(`te.created_at >= $${values.push(fromDate.toISOString())}::timestamptz`);
+      }
+    }
+    if (req.query.to) {
+      const toDate = new Date(req.query.to);
+      if (!isNaN(toDate.getTime())) {
+        const toInclusive = new Date(toDate.getTime() + 24 * 60 * 60 * 1000);
+        where.push(`te.created_at < $${values.push(toInclusive.toISOString())}::timestamptz`);
+      }
+    }
+    if (req.query.q) {
+      const like = `%${req.query.q}%`;
+      where.push(`(
+        te.event_type ILIKE $${values.push(like)}
+        OR te.task_id::text ILIKE $${values.push(like)}
+        OR COALESCE(te.payload::text, '') ILIKE $${values.push(like)}
+      )`);
+    }
+
+    values.push(limit);
+    const limitIdx = values.length;
+    values.push(offset);
+    const offsetIdx = values.length;
+
     const result = await db.query(
       `
-        SELECT event_type, payload, actor_user_id, task_id, created_at
-        FROM task_events
-        WHERE project_id = $1
-        ORDER BY created_at DESC, id DESC
-        LIMIT $2
-        OFFSET $3
+        SELECT te.event_type, te.payload, te.actor_user_id, te.task_id, te.created_at
+        FROM task_events te
+        WHERE ${where.join(' AND ')}
+        ORDER BY te.created_at DESC, te.id DESC
+        LIMIT $${limitIdx}
+        OFFSET $${offsetIdx}
       `,
-      [projectId, limit, offset]
+      values
     );
 
     sendJson(res, 200, { events: result.rows, limit, offset });
@@ -3874,7 +4593,7 @@ app.get('/projects/:projectId/tasks', async (req, res) => {
       result = await db.query(
         `
           SELECT id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
-                 priority, hours, descript, notes, deps, position, created_at, updated_at
+                 priority, hours, size, descript, notes, deps, position, created_at, updated_at
           FROM tasks
           WHERE project_id = $1
             AND assignee_user_id = $2
@@ -3886,7 +4605,7 @@ app.get('/projects/:projectId/tasks', async (req, res) => {
       result = await db.query(
         `
           SELECT id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
-                 priority, hours, descript, notes, deps, position, created_at, updated_at
+                 priority, hours, size, descript, notes, deps, position, created_at, updated_at
           FROM tasks
           WHERE project_id = $1
           ORDER BY col ASC, position ASC, created_at ASC
@@ -3897,6 +4616,11 @@ app.get('/projects/:projectId/tasks', async (req, res) => {
 
     sendJson(res, 200, { tasks: result.rows });
   } catch (error) {
+    if (error && error.code === '42703') {
+      console.error('GET /projects/:projectId/tasks failed: column missing, run migrations:', error.message);
+      sendJson(res, 500, { error: 'schema_outdated', hint: 'Выполните миграцию: npm run db:migrate' });
+      return;
+    }
     console.error('GET /projects/:projectId/tasks failed:', error.message);
     if (isDevelopment() && error.stack) {
       console.error(error.stack);
@@ -3947,15 +4671,16 @@ app.post('/projects/:projectId/tasks', async (req, res) => {
             agent,
             priority,
             hours,
+            size,
             descript,
             notes,
             deps
           )
           VALUES (
-            $1, $2, COALESCE($3, 'backlog'), $4, $5, $6, $7, $8, COALESCE($9, 0), $10, $11, $12, $13
+            $1, $2, COALESCE($3, 'backlog'), $4, $5, $6, $7, $8, COALESCE($9, 0), $10, $11, $12, $13, $14
           )
           RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
-                    priority, hours, descript, notes, deps, position, created_at, updated_at
+                    priority, hours, size, descript, notes, deps, position, created_at, updated_at
         `,
         [
           projectId,
@@ -3968,6 +4693,7 @@ app.post('/projects/:projectId/tasks', async (req, res) => {
           payload.agent ?? null,
           payload.priority ?? null,
           payload.hours ?? null,
+          payload.size && ['XS','S','M','L','XL'].includes(String(payload.size).trim().toUpperCase()) ? String(payload.size).trim().toUpperCase() : null,
           payload.descript ?? null,
           payload.notes ?? null,
           payload.deps ?? null,
@@ -4000,6 +4726,11 @@ app.post('/projects/:projectId/tasks', async (req, res) => {
   } catch (error) {
     if (error && (error.code === '23503' || error.code === '23514')) {
       sendJson(res, 400, { error: 'invalid_payload' });
+      return;
+    }
+    if (error && error.code === '42703') {
+      console.error('POST /projects/:projectId/tasks failed: column missing, run migrations:', error.message);
+      sendJson(res, 500, { error: 'schema_outdated', hint: 'Выполните миграцию: npm run db:migrate' });
       return;
     }
     console.error('POST /projects/:projectId/tasks failed:', error.message);
@@ -4154,7 +4885,7 @@ app.patch('/tasks/:id', async (req, res) => {
           SET ${update.setClause}
           WHERE id = $${update.values.length + 1}
           RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
-                    priority, hours, descript, notes, deps, position, created_at, updated_at
+                    priority, hours, size, descript, notes, deps, position, created_at, updated_at
         `,
         [...update.values, id]
       );
@@ -4228,6 +4959,354 @@ app.get('/tasks/:id/events', async (req, res) => {
       console.error(error.stack);
     }
     sendJson(res, 500, { error: 'events_unavailable' });
+  }
+});
+
+// ----- Task chat (persistent techlead chat per task) -----
+let taskChatsTableInitPromise = null;
+async function ensureTaskChatsTable(executor = db) {
+  if (!taskChatsTableInitPromise) {
+    taskChatsTableInitPromise = executor.query(`
+      CREATE TABLE IF NOT EXISTS task_chats (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+        content TEXT NOT NULL DEFAULT '',
+        action JSONB,
+        action_applied BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `).then(() => {
+      return executor.query(`
+        CREATE INDEX IF NOT EXISTS task_chats_task_id_created_at_idx
+        ON task_chats (task_id, created_at)
+      `).catch(() => {});
+    });
+  }
+  return taskChatsTableInitPromise;
+}
+
+function parseTaskChatPostPayload(payload) {
+  if (!isObjectPayload(payload)) {
+    return { error: 'invalid_payload' };
+  }
+  const content = typeof payload.content === 'string' ? payload.content.trim() : '';
+  if (!content) {
+    return { error: 'invalid_payload' };
+  }
+  return { value: { content } };
+}
+
+function extractActionFromTechleadResponse(text) {
+  if (typeof text !== 'string' || !text.trim()) {
+    return { text, action: null };
+  }
+  const match = text.match(/\s*ACTION_JSON::\s*(\{[\s\S]*?\})\s*$/);
+  if (!match) {
+    return { text: text.trim(), action: null };
+  }
+  const raw = match[1];
+  const action = tryParseJsonBlock(raw);
+  if (!action || typeof action !== 'object' || Array.isArray(action)) {
+    return { text: text.trim(), action: null };
+  }
+  const cleanText = text.replace(/\s*ACTION_JSON::\s*\{[\s\S]*\}\s*$/, '').trim();
+  return { text: cleanText, action };
+}
+
+app.get('/tasks/:id/chat', async (req, res) => {
+  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  if (!user) {
+    return;
+  }
+
+  const { id } = req.params;
+  if (!isUuid(id)) {
+    sendJson(res, 400, { error: 'invalid_task_id' });
+    return;
+  }
+
+  try {
+    await ensureTaskChatsTable();
+    const task = await findTaskById(id);
+    if (!task) {
+      sendJson(res, 404, { error: 'task_not_found' });
+      return;
+    }
+
+    const result = await db.query(
+      `
+        SELECT id, role, content, action, action_applied, created_at
+        FROM task_chats
+        WHERE task_id = $1
+        ORDER BY created_at ASC
+      `,
+      [id]
+    );
+
+    sendJson(res, 200, {
+      messages: result.rows.map((row) => ({
+        id: row.id,
+        role: row.role,
+        content: row.content,
+        action: row.action,
+        action_applied: row.action_applied,
+        created_at: row.created_at,
+      })),
+    });
+  } catch (error) {
+    console.error('GET /tasks/:id/chat failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'chat_unavailable' });
+  }
+});
+
+app.post('/tasks/:id/chat', async (req, res) => {
+  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  if (!user) {
+    return;
+  }
+
+  const { id } = req.params;
+  if (!isUuid(id)) {
+    sendJson(res, 400, { error: 'invalid_task_id' });
+    return;
+  }
+
+  const parsed = parseTaskChatPostPayload(req.body);
+  if (parsed.error) {
+    sendJson(res, 400, { error: parsed.error });
+    return;
+  }
+
+  const rateLimit = consumeLlmRateLimit(user.id);
+  if (!rateLimit.allowed) {
+    if (rateLimit.retryAfterSeconds > 0) {
+      res.set('Retry-After', String(rateLimit.retryAfterSeconds));
+    }
+    sendJson(res, 429, { error: 'rate_limited' });
+    return;
+  }
+
+  try {
+    await ensureTaskChatsTable();
+    const task = await findTaskById(id);
+    if (!task) {
+      sendJson(res, 404, { error: 'task_not_found' });
+      return;
+    }
+
+    const content = parsed.value.content;
+
+    await db.query(
+      `
+        INSERT INTO task_chats (task_id, role, content)
+        VALUES ($1, 'user', $2)
+      `,
+      [id, content]
+    );
+
+    const historyResult = await db.query(
+      `
+        SELECT role, content
+        FROM task_chats
+        WHERE task_id = $1
+        ORDER BY created_at ASC
+      `,
+      [id]
+    );
+
+    const messages = historyResult.rows.map((r) => ({
+      role: r.role,
+      content: r.content,
+    }));
+
+    const taskContext =
+      `Задача: id=${task.id}, title=${task.title || ''}, col=${task.col || 'backlog'}, ` +
+      `stage=${task.stage || ''}, agent=${task.agent || ''}, priority=${task.priority ?? 0}, ` +
+      `hours=${task.hours ?? ''}, descript=${(task.descript || '').slice(0, 1500)}.`;
+
+    const systemPrompt =
+      'Ты технический лид PlanKanban. Отвечай кратко и по делу на русском. ' +
+      'Контекст задачи: ' + taskContext + ' ' +
+      'Если пользователь просит изменить задачу (колонку, этап, приоритет, описание и т.д.), в конце ответа можно предложить изменение в формате: ACTION_JSON::{"field":"value"} с допустимыми полями: title, col, stage, agent, priority, hours, descript, notes. Один объект, без markdown.';
+
+    let llmText;
+    try {
+      llmText = await requestLlmText({
+        user,
+        purpose: 'chat',
+        projectId: task.project_id,
+        systemPrompt,
+        messages,
+        maxTokens: 700,
+        temperature: 0.2,
+      });
+    } catch (llmError) {
+      if (isAppError(llmError)) {
+        sendJson(res, llmError.statusCode, { error: llmError.errorCode });
+        return;
+      }
+      throw llmError;
+    }
+
+    const { text: assistantText, action } = extractActionFromTechleadResponse(llmText);
+
+    const insertAssistant = await db.query(
+      `
+        INSERT INTO task_chats (task_id, role, content, action)
+        VALUES ($1, 'assistant', $2, $3::jsonb)
+        RETURNING id, role, content, action, action_applied, created_at
+      `,
+      [id, assistantText, action ? JSON.stringify(action) : null]
+    );
+
+    const row = insertAssistant.rows[0];
+    sendJson(res, 200, {
+      message: {
+        id: row.id,
+        role: row.role,
+        content: row.content,
+        action: row.action,
+        action_applied: row.action_applied,
+        created_at: row.created_at,
+      },
+    });
+  } catch (error) {
+    if (isAppError(error)) {
+      sendJson(res, error.statusCode, { error: error.errorCode });
+      return;
+    }
+    console.error('POST /tasks/:id/chat failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'chat_unavailable' });
+  }
+});
+
+app.post('/tasks/:id/chat/apply/:messageId', async (req, res) => {
+  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  if (!user) {
+    return;
+  }
+
+  const { id: taskId, messageId } = req.params;
+  if (!isUuid(taskId) || !isUuid(messageId)) {
+    sendJson(res, 400, { error: 'invalid_task_id' });
+    return;
+  }
+
+  try {
+    const msgResult = await db.query(
+      `
+        SELECT id, task_id, action, action_applied
+        FROM task_chats
+        WHERE id = $1 AND task_id = $2
+        LIMIT 1
+      `,
+      [messageId, taskId]
+    );
+
+    if (msgResult.rows.length === 0) {
+      sendJson(res, 404, { error: 'message_not_found' });
+      return;
+    }
+
+    const row = msgResult.rows[0];
+    if (row.action_applied) {
+      sendJson(res, 409, { error: 'action_already_applied' });
+      return;
+    }
+
+    const action = row.action;
+    if (!action || typeof action !== 'object' || Array.isArray(action)) {
+      sendJson(res, 400, { error: 'invalid_payload' });
+      return;
+    }
+
+    const normalizedAction = normalizeChatActionForApply(action);
+    const parsed = parseTaskPatchPayload(normalizedAction);
+    if (parsed.error) {
+      sendJson(res, 400, { error: parsed.error });
+      return;
+    }
+
+    const after = await runInTransaction(async (tx) => {
+      const before = await findTaskById(taskId, tx);
+      if (!before) {
+        throw createAppError(404, 'task_not_found');
+      }
+
+      const updates = { ...parsed.value };
+      if (
+        updates.col !== undefined &&
+        updates.col !== null &&
+        updates.col !== before.col &&
+        updates.position === undefined
+      ) {
+        updates.position = await getNextTaskPosition(
+          before.project_id,
+          updates.col,
+          tx
+        );
+      }
+
+      const update = buildTaskUpdateStatement(updates);
+      const result = await tx.query(
+        `
+          UPDATE tasks
+          SET ${update.setClause}
+          WHERE id = $${update.values.length + 1}
+          RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+                    priority, hours, size, descript, notes, deps, position, created_at, updated_at
+        `,
+        [...update.values, taskId]
+      );
+      const updatedTask = result.rows[0];
+
+      await writeTaskEvent(
+        {
+          projectId: updatedTask.project_id,
+          taskId: updatedTask.id,
+          actorUserId: user.id,
+          eventType: 'task_updated',
+          action: 'update',
+          before,
+          after: updatedTask,
+          payload: {
+            fields_changed: Object.keys(parsed.value).sort(),
+            source: 'task_chat_apply',
+          },
+        },
+        tx
+      );
+
+      await tx.query(
+        `
+          UPDATE task_chats
+          SET action_applied = true
+          WHERE id = $1 AND task_id = $2
+        `,
+        [messageId, taskId]
+      );
+
+      return updatedTask;
+    });
+
+    sendJson(res, 200, { task: after });
+  } catch (error) {
+    if (isAppError(error)) {
+      sendJson(res, error.statusCode, { error: error.errorCode });
+      return;
+    }
+    console.error('POST /tasks/:id/chat/apply/:messageId failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'tasks_unavailable' });
   }
 });
 
@@ -4308,7 +5387,7 @@ app.delete('/tasks/:id', async (req, res) => {
 });
 
 app.get('/tasks/trash', async (req, res) => {
-  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  const user = requireAuth(req, res, TRASH_LIST_ROLES);
   if (!user) {
     return;
   }
@@ -4369,6 +5448,9 @@ app.get('/tasks/trash', async (req, res) => {
       }
       where.push(`(${qConditions.join(' OR ')})`);
     }
+    if (user.role === 'manager') {
+      where.push(`tt.deleted_by_user_id = $${values.push(user.id)}`);
+    }
 
     const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
     values.push(query.limit);
@@ -4389,6 +5471,7 @@ app.get('/tasks/trash', async (req, res) => {
           tt.agent,
           tt.priority,
           tt.hours,
+          tt.size,
           tt.descript,
           tt.notes,
           tt.deps,
@@ -4404,7 +5487,23 @@ app.get('/tasks/trash', async (req, res) => {
       values
     );
 
-    sendJson(res, 200, { items: result.rows });
+    const usersResult =
+      user.role === 'manager'
+        ? await db.query(
+            `SELECT DISTINCT COALESCE(u.email, 'unknown') AS email
+             FROM task_trash tt LEFT JOIN users u ON u.id = tt.deleted_by_user_id
+             WHERE tt.deleted_by_user_id = $1
+             ORDER BY email`,
+            [user.id]
+          )
+        : await db.query(
+            `SELECT DISTINCT COALESCE(u.email, 'unknown') AS email
+             FROM task_trash tt LEFT JOIN users u ON u.id = tt.deleted_by_user_id
+             ORDER BY email`
+          );
+    const deleted_by_users = usersResult.rows.map(r => r.email);
+
+    sendJson(res, 200, { items: result.rows, deleted_by_users });
   } catch (error) {
     console.error('GET /tasks/trash failed:', error.message);
     if (isDevelopment() && error.stack) {
@@ -4415,7 +5514,7 @@ app.get('/tasks/trash', async (req, res) => {
 });
 
 app.post('/tasks/:id/restore', async (req, res) => {
-  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  const user = requireAuth(req, res, TRASH_LIST_ROLES);
   if (!user) {
     return;
   }
@@ -4432,11 +5531,22 @@ app.post('/tasks/:id/restore', async (req, res) => {
     return;
   }
 
+  if (user.role === 'manager') {
+    const visibleProj = await findVisibleProjectById(parsed.value.project_id, user);
+    if (!visibleProj) {
+      sendJson(res, 404, { error: 'project_not_found' });
+      return;
+    }
+  }
+
   try {
     const restored = await runInTransaction(async (tx) => {
       const trashed = await findTaskInTrashByTaskId(id, tx);
       if (!trashed) {
         throw createAppError(404, 'task_not_found');
+      }
+      if (user.role === 'manager' && trashed.deleted_by_user_id !== user.id) {
+        throw createAppError(403, 'forbidden');
       }
 
       const project = await findProjectById(parsed.value.project_id, tx);
@@ -4478,6 +5588,7 @@ app.post('/tasks/:id/restore', async (req, res) => {
             agent,
             priority,
             hours,
+            size,
             descript,
             notes,
             deps,
@@ -4485,10 +5596,10 @@ app.post('/tasks/:id/restore', async (req, res) => {
             updated_at
           )
           VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, 0), $12, $13, $14, $15, $16, NOW()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, 0), $12, $13, $14, $15, $16, $17, NOW()
           )
           RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
-                    priority, hours, descript, notes, deps, position, created_at, updated_at
+                    priority, hours, size, descript, notes, deps, position, created_at, updated_at
         `,
         [
           trashed.task_id,
@@ -4503,6 +5614,7 @@ app.post('/tasks/:id/restore', async (req, res) => {
           trashed.agent,
           trashed.priority,
           trashed.hours,
+          trashed.size ?? null,
           trashed.descript,
           trashed.notes,
           trashed.deps,
@@ -4558,7 +5670,7 @@ app.post('/tasks/:id/restore', async (req, res) => {
 });
 
 app.delete('/tasks/:id/permanent', async (req, res) => {
-  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  const user = requireAuth(req, res, TRASH_LIST_ROLES);
   if (!user) {
     return;
   }
@@ -4574,6 +5686,9 @@ app.delete('/tasks/:id/permanent', async (req, res) => {
       const trashed = await findTaskInTrashByTaskId(id, tx);
       if (!trashed) {
         throw createAppError(404, 'task_not_found');
+      }
+      if (user.role === 'manager' && trashed.deleted_by_user_id !== user.id) {
+        throw createAppError(403, 'forbidden');
       }
 
       await tx.query(
@@ -4645,7 +5760,7 @@ app.post('/tasks/:id/move', async (req, res) => {
               updated_at = NOW()
           WHERE id = $3
           RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
-                    priority, hours, descript, notes, deps, position, created_at, updated_at
+                    priority, hours, size, descript, notes, deps, position, created_at, updated_at
         `,
         [targetCol, targetPosition, id]
       );
@@ -4719,10 +5834,16 @@ app.get('/stats/tasks', async (req, res) => {
     );
 
     const row = result.rows[0] || {};
+    const backlog = Number(row.backlog || 0);
+    const inWork = Number(row.in_work || 0);
+    const done = Number(row.done || 0);
+    const total = backlog + inWork + done;
+    const all_tasks_done = total > 0 && inWork === 0 && backlog === 0;
     sendJson(res, 200, {
-      backlog: Number(row.backlog || 0),
-      in_work: Number(row.in_work || 0),
-      done: Number(row.done || 0),
+      backlog,
+      in_work: inWork,
+      done,
+      all_tasks_done: all_tasks_done,
     });
   } catch (error) {
     console.error('GET /stats/tasks failed:', error.message);
@@ -4761,15 +5882,16 @@ app.get('/stats/budget', async (req, res) => {
       (sum, item) => sum + Math.round(Number(item.budget)),
       0
     );
-    const total = Math.max(
-      0,
-      totalFromStageSettings || Number(project.budget_total || 0)
-    );
+    const projectBudgetTotal = Number(project.budget_total || 0);
+    const total =
+      projectBudgetTotal > 0
+        ? Math.max(0, totalFromStageSettings || projectBudgetTotal)
+        : 0;
     const stages = validStageSettings.length > 0
       ? validStageSettings.map((item) => item.name.trim())
       : Array.isArray(project.stages) && project.stages.length > 0
       ? project.stages
-      : DEFAULT_PROJECT_STAGES;
+      : [];
     const values = [project.id];
     const employeeFilter =
       user.role === 'employee'
@@ -4787,17 +5909,19 @@ app.get('/stats/budget', async (req, res) => {
     );
 
     const stageBudgetMap = new Map();
-    if (validStageSettings.length > 0) {
-      for (const item of validStageSettings) {
-        stageBudgetMap.set(item.name.trim(), Math.round(Number(item.budget)));
-      }
-    } else {
-      const stageShare = stages.length > 0 ? Math.floor(total / stages.length) : 0;
-      let remainder = stages.length > 0 ? total - stageShare * stages.length : 0;
-      for (const stage of stages) {
-        const extra = remainder > 0 ? 1 : 0;
-        remainder = Math.max(0, remainder - extra);
-        stageBudgetMap.set(stage, stageShare + extra);
+    if (total > 0) {
+      if (validStageSettings.length > 0) {
+        for (const item of validStageSettings) {
+          stageBudgetMap.set(item.name.trim(), Math.round(Number(item.budget)));
+        }
+      } else {
+        const stageShare = stages.length > 0 ? Math.floor(total / stages.length) : 0;
+        let remainder = stages.length > 0 ? total - stageShare * stages.length : 0;
+        for (const stage of stages) {
+          const extra = remainder > 0 ? 1 : 0;
+          remainder = Math.max(0, remainder - extra);
+          stageBudgetMap.set(stage, stageShare + extra);
+        }
       }
     }
 
@@ -5235,7 +6359,14 @@ app.post('/llm/task-dialog', async (req, res) => {
     const candidate = tryParseJsonBlock(llmText);
     const normalized = ensureTaskDialogShape(candidate);
     if (!normalized) {
-      sendJson(res, 200, buildFallbackDialogTask(parsed.value.messages));
+      let firstStage = '';
+      if (resolvedProjectId) {
+        const proj = await findProjectById(resolvedProjectId);
+        const stages = Array.isArray(proj && proj.stages) ? proj.stages : [];
+        const settings = Array.isArray(proj && proj.stage_settings) ? proj.stage_settings : [];
+        firstStage = settings[0] && settings[0].name ? settings[0].name : (stages[0] || '');
+      }
+      sendJson(res, 200, buildFallbackDialogTask(parsed.value.messages, firstStage));
       return;
     }
     sendJson(res, 200, normalized);
@@ -5252,7 +6383,41 @@ app.post('/llm/task-dialog', async (req, res) => {
   }
 });
 
+app.post('/api/import/events', async (req, res) => {
+  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  if (!user) {
+    return;
+  }
+
+  const body = req.body;
+  const event = typeof body.event === 'string' ? body.event.trim() : '';
+  if (!['import_started', 'import_completed', 'import_failed'].includes(event)) {
+    sendJson(res, 400, { error: 'invalid_payload' });
+    return;
+  }
+
+  const projectId = body.project_id != null && isUuid(body.project_id) ? body.project_id : null;
+  const payload = isObjectPayload(body.payload) ? body.payload : {};
+
+  try {
+    await db.query(
+      `INSERT INTO import_events (project_id, actor_user_id, event, payload)
+       VALUES ($1, $2, $3, $4::jsonb)`,
+      [projectId, user.id, event, JSON.stringify(payload)]
+    );
+    sendJson(res, 204);
+  } catch (err) {
+    if (err.code === '42P01') {
+      sendJson(res, 501, { error: 'import_events_unavailable' });
+      return;
+    }
+    console.error('POST /api/import/events failed:', err.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
 app.post('/import/excel', async (req, res) => {
+  console.log("[import] request received, body size:", JSON.stringify(req.body)?.length);
   const user = requireAuth(req, res, TASK_WRITE_ROLES);
   if (!user) {
     return;
@@ -5283,41 +6448,51 @@ app.post('/import/excel', async (req, res) => {
       return;
     }
 
-    const systemPrompt =
-      'Ты парсер задач PlanKanban. Верни только JSON-массив объектов формата: ' +
-      '[{"title":"...","stage":"...","description":"...","release":"...","notes":"...","priority":0}]. ' +
-      'Никакого markdown и пояснений.';
+    const contentLen = parsed.value.content.length;
+    const CHUNK_SIZE = 10000;
+    const chunks = [];
+    for (let i = 0; i < parsed.value.content.length; i += CHUNK_SIZE) {
+      chunks.push(parsed.value.content.substring(i, i + CHUNK_SIZE));
+    }
 
-    let parsedTasks = [];
-    try {
-      const llmText = await requestLlmText({
-        user,
-        purpose: 'import_parse',
-        projectId: project.id,
-        systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: parsed.value.content,
-          },
-        ],
-        maxTokens: 1800,
-        temperature: 0.1,
-      });
-      parsedTasks = normalizeImportedTasks(tryParseJsonBlock(llmText));
-    } catch (error) {
-      if (isAppError(error) && error.errorCode === 'llm_unavailable') {
-        parsedTasks = [];
-      } else {
-        throw error;
+    const systemPrompt =
+      'Ты — парсер задач. Верни ТОЛЬКО JSON-массив без markdown, без пояснений, без текста до или после. ' +
+      'Формат каждого объекта: {"title":"...","stage":"название этапа из документа","description":"...","priority":1|2|3|4,"hours":число или null,"size":"XS|S|M|L|XL","deps":"id1,id2" или []}. ' +
+      'priority — число: 1=Low, 2=Medium, 3=High, 4=Critical. Ищи в колонке с любым названием, указывающим на приоритет/срочность/важность: priority, urgency, importance, significance, vital, crucial, critical, necessity, essential, indispensable, приоритет, срочность, важность и т.п. (текст или цвет). ' +
+      'hours — затраченное время в часах. size — объём XS|S|M|L|XL. deps — зависимости (ID через запятую). Извлекай все из таблицы. ' +
+      'Если задач нет — верни пустой массив []. ' +
+      'Первый символ ответа должен быть [, последний — ].';
+
+    let allTasks = [];
+    for (const chunk of chunks) {
+      try {
+        const llmText = await requestLlmText({
+          user,
+          purpose: 'import_parse',
+          projectId: project.id,
+          systemPrompt,
+          messages: [{ role: 'user', content: chunk }],
+          maxTokens: 8192,
+          temperature: 0.1,
+        });
+        const chunkTasks = normalizeImportedTasks(tryParseJsonBlock(llmText));
+        allTasks = allTasks.concat(chunkTasks);
+      } catch (err) {
+        if (isAppError(err) && err.errorCode === 'llm_unavailable') continue;
+        throw err;
       }
     }
+    let parsedTasks = allTasks;
 
     if (parsedTasks.length === 0) {
       parsedTasks = fallbackImportTasksFromContent(parsed.value.content);
     }
     if (parsedTasks.length === 0) {
-      sendJson(res, 400, { error: 'empty_import' });
+      sendJson(res, 400, {
+        error: 'empty_import',
+        hint: 'llm_parse_failed',
+        content_length: contentLen,
+      });
       return;
     }
 
@@ -5336,15 +6511,16 @@ app.post('/import/excel', async (req, res) => {
               agent,
               priority,
               hours,
+              size,
               descript,
               notes,
               deps
             )
             VALUES (
-              $1, $2, 'backlog', $3, NULL, $4, NULL, $5, NULL, $6, $7, NULL
+              $1, $2, 'backlog', $3, NULL, $4, NULL, $5, $6, $7, $8, $9, $10::jsonb
             )
             RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
-                      priority, hours, descript, notes, deps, created_at, updated_at
+                      priority, hours, size, descript, notes, deps, created_at, updated_at
           `,
           [
             project.id,
@@ -5352,8 +6528,11 @@ app.post('/import/excel', async (req, res) => {
             item.stage,
             item.release || null,
             item.priority,
-            item.description,
-            item.notes,
+            item.hours ?? null,
+            item.size ?? null,
+            item.description || null,
+            item.notes || null,
+            item.deps ?? null,
           ]
         );
         const createdTask = created.rows[0];
@@ -5377,6 +6556,8 @@ app.post('/import/excel', async (req, res) => {
       return inserted;
     });
 
+    await recalculateProjectDuration(project.id);
+
     sendJson(res, 201, {
       created: createdTasks.length,
       tasks: createdTasks,
@@ -5392,6 +6573,370 @@ app.post('/import/excel', async (req, res) => {
     }
     sendJson(res, 500, { error: 'import_unavailable' });
   }
+});
+
+async function processImportJobAsync(payload) {
+  const { jobId, projectId, actorUserId, content, fileName } = payload;
+  const CHUNK_SIZE = 10000;
+  const lines = content.split('\n');
+  const chunks = [];
+  let currentChunk = '';
+  for (const line of lines) {
+    if (currentChunk.length + line.length + 1 > CHUNK_SIZE && currentChunk) {
+      chunks.push(currentChunk);
+      currentChunk = '';
+    }
+    currentChunk += (currentChunk ? '\n' : '') + line;
+  }
+  if (currentChunk) chunks.push(currentChunk);
+
+  const systemPrompt =
+    'Ты — парсер задач. Верни ТОЛЬКО JSON-массив без markdown, без пояснений, без текста до или после. ' +
+    'Формат каждого объекта: {"title":"...","stage":"название этапа из документа","description":"...","priority":1|2|3|4,"hours":число или null,"size":"XS|S|M|L|XL","deps":"id1,id2" или []}. ' +
+    'priority: 1=Low, 2=Medium, 3=High, 4=Critical. Ищи в колонке с любым названием: priority, urgency, importance, significance, vital, crucial, critical, necessity, essential, indispensable, приоритет, срочность, важность и т.п. hours, size, deps — извлекай из таблицы. ' +
+    'Если задач нет — верни пустой массив []. ' +
+    'Первый символ ответа должен быть [, последний — ].';
+
+  try {
+    await db.query(
+      'UPDATE import_jobs SET status = $1, total_chunks = $2, updated_at = now() WHERE id = $3',
+      ['processing', chunks.length, jobId]
+    );
+
+    const user = await findUserById(actorUserId);
+    if (!user) {
+      await db.query(
+        'UPDATE import_jobs SET status = $1, error = $2, updated_at = now() WHERE id = $3',
+        ['failed', 'User not found', jobId]
+      );
+      return;
+    }
+
+    const project = await findVisibleProjectById(projectId, user);
+    if (!project) {
+      await db.query(
+        'UPDATE import_jobs SET status = $1, error = $2, updated_at = now() WHERE id = $3',
+        ['failed', 'Project not found', jobId]
+      );
+      return;
+    }
+
+    let allTasks = [];
+    for (let idx = 0; idx < chunks.length; idx++) {
+      const chunk = chunks[idx];
+      try {
+        const llmText = await requestLlmText({
+          user,
+          purpose: 'import_parse',
+          projectId: project.id,
+          systemPrompt,
+          messages: [{ role: 'user', content: chunk }],
+          maxTokens: 8192,
+          temperature: 0.1,
+        });
+        const chunkTasks = normalizeImportedTasks(tryParseJsonBlock(llmText));
+        allTasks = allTasks.concat(chunkTasks);
+      } catch (err) {
+        if (isAppError(err) && err.errorCode === 'llm_unavailable') {
+          // skip chunk
+        } else {
+          throw err;
+        }
+      }
+
+      await db.query(
+        'UPDATE import_jobs SET processed_chunks = $1, updated_at = now() WHERE id = $2',
+        [idx + 1, jobId]
+      );
+    }
+
+    const seen = new Set();
+    allTasks = allTasks.filter((t) => {
+      const key = t.title.trim().toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    let totalTasksCreated = 0;
+    if (allTasks.length > 0) {
+      const inserted = await runInTransaction(async (tx) => {
+        const inserted = [];
+        for (const item of allTasks) {
+          const created = await tx.query(
+            `
+              INSERT INTO tasks (
+                project_id,
+                title,
+                col,
+                stage,
+                assignee_user_id,
+                track,
+                agent,
+                priority,
+                hours,
+                size,
+                descript,
+                notes,
+                deps
+              )
+              VALUES (
+                $1, $2, 'backlog', $3, NULL, $4, NULL, $5, $6, $7, $8, $9, $10::jsonb
+              )
+              RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+                        priority, hours, size, descript, notes, deps, created_at, updated_at
+            `,
+            [
+              project.id,
+              item.title,
+              item.stage,
+              item.release || null,
+              item.priority,
+              item.hours ?? null,
+              item.size ?? null,
+              item.description || null,
+              item.notes || null,
+              item.deps ?? null,
+            ]
+          );
+          const createdTask = created.rows[0];
+          inserted.push(createdTask);
+          await writeTaskEvent(
+            {
+              projectId: project.id,
+              taskId: createdTask.id,
+              actorUserId: user.id,
+              action: 'create',
+              before: {},
+              after: createdTask,
+              payload: {
+                source: 'import_excel',
+                file_name: fileName,
+              },
+            },
+            tx
+          );
+        }
+        return inserted;
+      });
+      totalTasksCreated = inserted.length;
+      await db.query(
+        'UPDATE import_jobs SET tasks_created = $1, updated_at = now() WHERE id = $2',
+        [totalTasksCreated, jobId]
+      );
+      await recalculateProjectDuration(project.id);
+    }
+
+    const fallbackTasks =
+      totalTasksCreated === 0
+        ? fallbackImportTasksFromContent(content)
+        : [];
+    if (fallbackTasks.length > 0) {
+      const inserted = await runInTransaction(async (tx) => {
+        const inserted = [];
+        for (const item of fallbackTasks) {
+          const created = await tx.query(
+            `
+              INSERT INTO tasks (
+                project_id,
+                title,
+                col,
+                stage,
+                assignee_user_id,
+                track,
+                agent,
+                priority,
+                hours,
+                size,
+                descript,
+                notes,
+                deps
+              )
+              VALUES (
+                $1, $2, 'backlog', $3, NULL, $4, NULL, $5, NULL, NULL, $6, $7, NULL
+              )
+              RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+                        priority, hours, size, descript, notes, deps, created_at, updated_at
+            `,
+            [
+              project.id,
+              item.title,
+              item.stage,
+              item.release || null,
+              item.priority,
+              item.description || null,
+              item.notes || null,
+            ]
+          );
+          const createdTask = created.rows[0];
+          inserted.push(createdTask);
+          await writeTaskEvent(
+            {
+              projectId: project.id,
+              taskId: createdTask.id,
+              actorUserId: user.id,
+              action: 'create',
+              before: {},
+              after: createdTask,
+              payload: {
+                source: 'import_excel',
+                file_name: fileName,
+              },
+            },
+            tx
+          );
+        }
+        return inserted;
+      });
+      totalTasksCreated += inserted.length;
+      await recalculateProjectDuration(project.id);
+    }
+
+    await db.query(
+      'UPDATE import_jobs SET status = $1, tasks_created = $2, result_meta = $3, updated_at = now() WHERE id = $4',
+      ['done', totalTasksCreated, JSON.stringify({}), jobId]
+    );
+  } catch (error) {
+    const message = error && error.message ? String(error.message) : 'Unknown error';
+    await db.query(
+      'UPDATE import_jobs SET status = $1, error = $2, updated_at = now() WHERE id = $3',
+      ['failed', message, jobId]
+    ).catch((err) => {
+      console.error('[import] failed to update job on error:', err.message);
+    });
+  }
+}
+
+app.post('/import/async', async (req, res) => {
+  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  if (!user) {
+    return;
+  }
+
+  const parsed = parseImportExcelPayload(req.body);
+  if (parsed.error) {
+    sendJson(res, 400, { error: parsed.error });
+    return;
+  }
+
+  const activeProject = await resolveActiveProjectForUser(user);
+  const projectId = parsed.value.project_id || (activeProject && activeProject.id);
+  if (!projectId) {
+    sendJson(res, 404, { error: 'project_not_found' });
+    return;
+  }
+
+  const project = await findVisibleProjectById(projectId, user);
+  if (!project) {
+    sendJson(res, 404, { error: 'project_not_found' });
+    return;
+  }
+
+  if (!isPurposeAllowedForUser(user, 'import_parse')) {
+    sendJson(res, 403, { error: 'forbidden' });
+    return;
+  }
+
+  try {
+    const job = await db.query(
+      `INSERT INTO import_jobs (project_id, actor_user_id, status, total_chunks, processed_chunks, tasks_created)
+       VALUES ($1, $2, 'pending', 0, 0, 0)
+       RETURNING id, status, created_at`,
+      [project.id, user.id]
+    );
+    const jobId = job.rows[0].id;
+
+    setImmediate(() => {
+      processImportJobAsync({
+        jobId,
+        projectId: project.id,
+        actorUserId: user.id,
+        content: parsed.value.content,
+        fileName: parsed.value.file_name,
+      }).catch((err) => {
+        console.error('[import] async job failed:', err.message);
+      });
+    });
+
+    sendJson(res, 202, {
+      job_id: jobId,
+      status: 'pending',
+    });
+  } catch (error) {
+    console.error('POST /import/async failed:', error.message);
+    sendJson(res, 500, { error: 'import_unavailable' });
+  }
+});
+
+app.get('/import/status/:jobId', async (req, res) => {
+  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  if (!user) {
+    return;
+  }
+
+  const jobId = req.params.jobId;
+  if (!jobId || !isUuid(jobId)) {
+    sendJson(res, 404, { error: 'not_found' });
+    return;
+  }
+
+  const job = await db.query(
+    'SELECT id, project_id, actor_user_id, status, total_chunks, processed_chunks, tasks_created, error, result_meta, created_at, updated_at FROM import_jobs WHERE id = $1',
+    [jobId]
+  );
+  if (!job.rows[0]) {
+    sendJson(res, 404, { error: 'not_found' });
+    return;
+  }
+
+  const row = job.rows[0];
+  if (row.actor_user_id !== user.id) {
+    sendJson(res, 404, { error: 'not_found' });
+    return;
+  }
+
+  sendJson(res, 200, {
+    job_id: row.id,
+    project_id: row.project_id,
+    status: row.status,
+    total_chunks: row.total_chunks,
+    processed_chunks: row.processed_chunks,
+    tasks_created: row.tasks_created,
+    error: row.error,
+    result_meta: row.result_meta,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  });
+});
+
+app.get('/import/jobs', async (req, res) => {
+  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  if (!user) {
+    return;
+  }
+
+  const jobs = await db.query(
+    `SELECT id, project_id, actor_user_id, status, total_chunks, processed_chunks, tasks_created, error, created_at, updated_at
+     FROM import_jobs
+     WHERE actor_user_id = $1
+     ORDER BY created_at DESC
+     LIMIT 10`,
+    [user.id]
+  );
+
+  sendJson(res, 200, {
+    jobs: jobs.rows.map((row) => ({
+      job_id: row.id,
+      project_id: row.project_id,
+      status: row.status,
+      total_chunks: row.total_chunks,
+      processed_chunks: row.processed_chunks,
+      tasks_created: row.tasks_created,
+      error: row.error,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    })),
+  });
 });
 
 app.post('/api/service-accounts', async (req, res) => {
@@ -5696,8 +7241,416 @@ app.get('/api/events', async (req, res) => {
   }
 });
 
+app.post('/api/llm/verify-key', async (req, res) => {
+  const user = requireAuth(req, res, LLM_ROLES);
+  if (!user) return;
+
+  const body = req.body;
+  const provider =
+    typeof body.provider === 'string' ? body.provider.trim().toLowerCase() : '';
+  const apiKey = typeof body.api_key === 'string' ? body.api_key.trim() : '';
+  const baseUrl = typeof body.base_url === 'string' ? body.base_url.trim() : '';
+  if (!provider || !apiKey) {
+    sendJson(res, 400, { error: 'invalid_payload' });
+    return;
+  }
+
+  try {
+    if (provider === 'anthropic') {
+      const response = await fetch('https://api.anthropic.com/v1/models', {
+        method: 'GET',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': ANTHROPIC_API_VERSION,
+          'content-type': 'application/json',
+        },
+      });
+      const data = await readJsonSafely(response);
+      if (!response.ok) {
+        const errMsg =
+          data && data.error && typeof data.error.message === 'string'
+            ? data.error.message
+            : 'invalid_key';
+        sendJson(res, 200, { valid: false, error: errMsg });
+        return;
+      }
+      const models = Array.isArray(data && data.data)
+        ? data.data.map(function (m) {
+            return m && typeof m.id === 'string' ? m.id : null;
+          }).filter(Boolean)
+        : [];
+      refreshLlmPricingCache().catch(() => {});
+      sendJson(res, 200, { valid: true, models: models.length ? models : ANTHROPIC_ALLOWED_MODELS.slice() });
+      return;
+    }
+
+    if (!ALL_LLM_PROVIDERS.includes(provider)) {
+      sendJson(res, 400, { error: 'invalid_payload', message: 'Неизвестный провайдер' });
+      return;
+    }
+
+    const userSetting = baseUrl ? { base_url: baseUrl } : null;
+    const base = getOpenAiCompatibleBaseUrl(provider, userSetting);
+    if (!base) {
+      sendJson(res, 200, { valid: false, error: 'Для этого провайдера укажите base_url' });
+      return;
+    }
+    const response = await fetch(base + '/v1/models', {
+      method: 'GET',
+      headers: {
+        Authorization: 'Bearer ' + apiKey,
+        'content-type': 'application/json',
+      },
+    });
+    const data = await readJsonSafely(response);
+    if (!response.ok) {
+      const errMsg =
+        data && data.error && typeof data.error.message === 'string'
+          ? data.error.message
+          : data && typeof data.error === 'string'
+            ? data.error
+            : 'invalid_key';
+      sendJson(res, 200, { valid: false, error: errMsg });
+      return;
+    }
+    const raw = Array.isArray(data && data.data) ? data.data : [];
+    const models = raw
+      .map((m) => (m && typeof m.id === 'string' ? m.id : null))
+      .filter(Boolean)
+      .sort();
+    const fallback = getLlmAllowedModels(provider);
+    refreshLlmPricingCache().catch(() => {});
+    sendJson(res, 200, { valid: true, models: models.length ? models : (fallback.length ? fallback : []) });
+  } catch (err) {
+    console.error('POST /api/llm/verify-key failed:', err.message);
+    sendJson(res, 200, { valid: false, error: 'request_failed' });
+  }
+});
+
+app.get('/api/llm/provider-settings', async (req, res) => {
+  const user = requireAuth(req, res, LLM_ROLES);
+  if (!user) {
+    return;
+  }
+
+  try {
+    const result = await db.query(
+      `SELECT id, user_id, purpose, provider, model, base_url, is_enabled,
+              COALESCE(is_individual_override, false) AS is_individual_override,
+              created_at, updated_at
+       FROM llm_provider_settings
+       WHERE user_id = $1
+       ORDER BY purpose`,
+      [user.id]
+    );
+    const countIndiv = await db.query(
+      `SELECT COUNT(*)::int AS c FROM llm_provider_settings
+       WHERE user_id = $1 AND is_enabled = true AND is_individual_override = true`,
+      [user.id]
+    ).catch(function () { return { rows: [{ c: 0 }] }; });
+    const allPurposesIndividual = Number((countIndiv.rows[0] && countIndiv.rows[0].c) || 0) >= 3;
+    sendJson(res, 200, { settings: result.rows, all_purposes_individual: allPurposesIndividual });
+  } catch (err) {
+    if (err.code === '42P01') {
+      sendJson(res, 200, { settings: [] });
+      return;
+    }
+    console.error('GET /api/llm/provider-settings failed:', err.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.post('/api/llm/provider-settings', async (req, res) => {
+  const user = requireAuth(req, res, LLM_ROLES);
+  if (!user) return;
+
+  const parsed = parseProviderSettingPayload(req.body, false);
+  if (parsed.error) {
+    sendJson(res, 400, { error: parsed.error });
+    return;
+  }
+
+  const { purpose, provider, model, api_key, base_url, is_enabled, is_individual_override } = parsed.value;
+  const setIndividual = is_individual_override === true;
+  const apiKeyEncrypted = api_key ? encryptLlmUserKey(api_key) : null;
+  if (api_key && !apiKeyEncrypted) {
+    sendJson(res, 500, { error: 'encryption_unavailable' });
+    return;
+  }
+
+  if (!setIndividual) {
+    const countResult = await db.query(
+      `SELECT COUNT(*)::int AS c FROM llm_provider_settings
+       WHERE user_id = $1 AND is_enabled = true AND is_individual_override = true`,
+      [user.id]
+    );
+    const indivCount = Number((countResult.rows[0] && countResult.rows[0].c) || 0);
+    if (indivCount >= 3) {
+      sendJson(res, 409, { error: 'all_purposes_individual', message: 'Все три блока имеют индивидуальные настройки. Снимите галочку с одного блока в Индивидуальных настройках, чтобы разблокировать Базовые.' });
+      return;
+    }
+  }
+
+  try {
+    const result = await db.query(
+      `INSERT INTO llm_provider_settings (user_id, purpose, provider, model, api_key_encrypted, base_url, is_enabled, is_individual_override, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+       ON CONFLICT (user_id, purpose) DO UPDATE SET
+         provider = EXCLUDED.provider,
+         model = EXCLUDED.model,
+         api_key_encrypted = COALESCE(EXCLUDED.api_key_encrypted, llm_provider_settings.api_key_encrypted),
+         base_url = EXCLUDED.base_url,
+         is_enabled = EXCLUDED.is_enabled,
+         is_individual_override = EXCLUDED.is_individual_override,
+         updated_at = now()
+       RETURNING id, user_id, purpose, provider, model, base_url, is_enabled, created_at, updated_at`,
+      [user.id, purpose, provider, model, apiKeyEncrypted, base_url, is_enabled, setIndividual]
+    );
+    const row = result.rows[0];
+    sendJson(res, 201, { setting: row });
+  } catch (err) {
+    if (err.code === '42P01') {
+      sendJson(res, 501, { error: 'provider_settings_unavailable' });
+      return;
+    }
+    console.error('POST /api/llm/provider-settings failed:', err.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.patch('/api/llm/provider-settings/:id', async (req, res) => {
+  const user = requireAuth(req, res, LLM_ROLES);
+  if (!user) return;
+
+  const id = req.params.id;
+  if (!id || !isUuid(id)) {
+    sendJson(res, 400, { error: 'invalid_payload' });
+    return;
+  }
+
+  const body = req.body;
+  const updates = [];
+  const values = [];
+  let idx = 1;
+
+  if (body.provider !== undefined) {
+    const p = String(body.provider).trim().toLowerCase();
+    if (!LLM_PROVIDER_SETTINGS_PROVIDERS.includes(p)) {
+      sendJson(res, 400, { error: 'invalid_payload' });
+      return;
+    }
+    updates.push(`provider = $${idx++}`);
+    values.push(p);
+  }
+  if (body.model !== undefined) {
+    const m = String(body.model).trim();
+    if (!m) {
+      sendJson(res, 400, { error: 'invalid_payload' });
+      return;
+    }
+    updates.push(`model = $${idx++}`);
+    values.push(m);
+  }
+  if (body.base_url !== undefined) {
+    updates.push(`base_url = $${idx++}`);
+    values.push(
+      body.base_url === null || body.base_url === ''
+        ? null
+        : String(body.base_url).trim()
+    );
+  }
+  if (body.is_enabled !== undefined) {
+    updates.push(`is_enabled = $${idx++}`);
+    values.push(Boolean(body.is_enabled));
+  }
+  if (body.is_individual_override !== undefined) {
+    updates.push(`is_individual_override = $${idx++}`);
+    values.push(Boolean(body.is_individual_override));
+  }
+  if (typeof body.api_key === 'string' && body.api_key.trim()) {
+    const enc = encryptLlmUserKey(body.api_key.trim());
+    if (!enc) {
+      sendJson(res, 500, { error: 'encryption_unavailable' });
+      return;
+    }
+    updates.push(`api_key_encrypted = $${idx++}`);
+    values.push(enc);
+  }
+
+  if (updates.length === 0) {
+    sendJson(res, 400, { error: 'invalid_payload' });
+    return;
+  }
+
+  updates.push('updated_at = now()');
+  values.push(id, user.id);
+
+  try {
+    const result = await db.query(
+      `UPDATE llm_provider_settings SET ${updates.join(', ')}
+       WHERE id = $${idx} AND user_id = $${idx + 1}
+       RETURNING id, user_id, purpose, provider, model, base_url, is_enabled, created_at, updated_at`,
+      values
+    );
+    if (result.rows.length === 0) {
+      sendJson(res, 404, { error: 'not_found' });
+      return;
+    }
+    sendJson(res, 200, { setting: result.rows[0] });
+  } catch (err) {
+    if (err.code === '42P01') {
+      sendJson(res, 501, { error: 'provider_settings_unavailable' });
+      return;
+    }
+    console.error('PATCH /api/llm/provider-settings/:id failed:', err.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.delete('/api/llm/provider-settings/:id', async (req, res) => {
+  const user = requireAuth(req, res, LLM_ROLES);
+  if (!user) return;
+
+  const id = req.params.id;
+  if (!id || !isUuid(id)) {
+    sendJson(res, 400, { error: 'invalid_payload' });
+    return;
+  }
+
+  try {
+    const result = await db.query(
+      'DELETE FROM llm_provider_settings WHERE id = $1 AND user_id = $2 RETURNING id',
+      [id, user.id]
+    );
+    if (result.rows.length === 0) {
+      sendJson(res, 404, { error: 'not_found' });
+      return;
+    }
+    sendNoContent(res);
+  } catch (err) {
+    if (err.code === '42P01') {
+      sendJson(res, 501, { error: 'provider_settings_unavailable' });
+      return;
+    }
+    console.error('DELETE /api/llm/provider-settings/:id failed:', err.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.get('/api/llm/usage', async (req, res) => {
+  const user = requireAuth(req, res, LLM_ROLES);
+  if (!user) return;
+
+  const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 100), 500);
+  const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+
+  try {
+    const rowsResult = await db.query(
+      `SELECT id, project_id, purpose, provider, model, request_meta, response_meta,
+              input_tokens, output_tokens, cost_estimate_usd, status, error_code, created_at
+       FROM llm_requests
+       WHERE actor_user_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [user.id, limit, offset]
+    );
+    const summaryResult = await db.query(
+      `SELECT
+         COUNT(*) AS total_requests,
+         COUNT(*) FILTER (WHERE status = 'ok') AS ok_count,
+         COUNT(*) FILTER (WHERE status = 'error') AS error_count,
+         COALESCE(SUM(input_tokens), 0)::bigint AS total_input_tokens,
+         COALESCE(SUM(output_tokens), 0)::bigint AS total_output_tokens,
+         COALESCE(SUM(cost_estimate_usd), 0)::numeric AS total_cost_usd
+       FROM llm_requests WHERE actor_user_id = $1`,
+      [user.id]
+    );
+    const byModelResult = await db.query(
+      `SELECT provider, model,
+         COUNT(*) AS count,
+         COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+         COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
+         COALESCE(SUM(cost_estimate_usd), 0)::numeric AS cost_usd
+       FROM llm_requests WHERE actor_user_id = $1
+       GROUP BY provider, model ORDER BY count DESC, provider, model`,
+      [user.id]
+    );
+    const byPurposeResult = await db.query(
+      `SELECT purpose,
+         COUNT(*) AS count,
+         COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+         COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
+         COALESCE(SUM(cost_estimate_usd), 0)::numeric AS cost_usd
+       FROM llm_requests WHERE actor_user_id = $1
+       GROUP BY purpose ORDER BY count DESC`,
+      [user.id]
+    );
+
+    const summary = summaryResult.rows[0] || {};
+    sendJson(res, 200, {
+      rows: rowsResult.rows.map((r) => ({
+        id: r.id,
+        project_id: r.project_id,
+        purpose: r.purpose,
+        provider: r.provider,
+        model: r.model,
+        request_meta: r.request_meta,
+        response_meta: r.response_meta,
+        input_tokens: r.input_tokens,
+        output_tokens: r.output_tokens,
+        cost_estimate_usd: r.cost_estimate_usd != null ? String(r.cost_estimate_usd) : null,
+        status: r.status,
+        error_code: r.error_code,
+        created_at: r.created_at,
+      })),
+      summary: {
+        total_requests: parseInt(summary.total_requests, 10) || 0,
+        ok_count: parseInt(summary.ok_count, 10) || 0,
+        error_count: parseInt(summary.error_count, 10) || 0,
+        total_input_tokens: parseInt(summary.total_input_tokens, 10) || 0,
+        total_output_tokens: parseInt(summary.total_output_tokens, 10) || 0,
+        total_cost_usd: summary.total_cost_usd != null ? String(summary.total_cost_usd) : '0',
+      },
+      by_model: byModelResult.rows.map((r) => ({
+        provider: r.provider,
+        model: r.model,
+        count: parseInt(r.count, 10),
+        input_tokens: parseInt(r.input_tokens, 10) || 0,
+        output_tokens: parseInt(r.output_tokens, 10) || 0,
+        cost_usd: r.cost_usd != null ? String(r.cost_usd) : '0',
+      })),
+      by_purpose: byPurposeResult.rows.map((r) => ({
+        purpose: r.purpose,
+        count: parseInt(r.count, 10),
+        input_tokens: parseInt(r.input_tokens, 10) || 0,
+        output_tokens: parseInt(r.output_tokens, 10) || 0,
+        cost_usd: r.cost_usd != null ? String(r.cost_usd) : '0',
+      })),
+    });
+  } catch (err) {
+    console.error('GET /api/llm/usage failed:', err.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.delete('/api/llm/usage', async (req, res) => {
+  const user = requireAuth(req, res, LLM_ROLES);
+  if (!user) return;
+
+  try {
+    const result = await db.query(
+      'DELETE FROM llm_requests WHERE actor_user_id = $1 RETURNING id',
+      [user.id]
+    );
+    sendJson(res, 200, { deleted: result.rowCount || 0 });
+  } catch (err) {
+    console.error('DELETE /api/llm/usage failed:', err.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
 app.get('/api/llm/models', (req, res) => {
-  const user = requireAuth(req, res);
+  const user = requireAuth(req, res, LLM_ROLES);
   if (!user) {
     return;
   }
@@ -5716,8 +7669,95 @@ app.get('/api/llm/models', (req, res) => {
   sendJson(res, 200, { provider, models });
 });
 
+app.post('/api/llm/models/list', async (req, res) => {
+  const user = requireAuth(req, res, LLM_ROLES);
+  if (!user) return;
+
+  const body = req.body || {};
+  const provider =
+    typeof body.provider === 'string' ? body.provider.trim().toLowerCase() : '';
+  const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : (typeof body.api_key === 'string' ? body.api_key.trim() : '');
+  const baseUrl = typeof body.baseUrl === 'string' ? body.baseUrl.trim().replace(/\/+$/, '') : '';
+
+  if (!provider || !apiKey) {
+    sendJson(res, 400, { error: 'invalid_payload', message: 'provider and apiKey required' });
+    return;
+  }
+
+  const getDefaultBase = () => {
+    switch (provider) {
+      case 'openai':
+        return 'https://api.openai.com';
+      case 'deepseek':
+        return 'https://api.deepseek.com';
+      case 'groq':
+        return 'https://api.groq.com/openai/v1';
+      case 'qwen':
+        return 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+      case 'google':
+      case 'custom':
+        return baseUrl || '';
+      default:
+        return baseUrl || '';
+    }
+  };
+
+  try {
+    if (provider === 'anthropic') {
+      const response = await fetch('https://api.anthropic.com/v1/models', {
+        method: 'GET',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': ANTHROPIC_API_VERSION,
+          'content-type': 'application/json',
+        },
+      });
+      const data = await readJsonSafely(response);
+      if (!response.ok) {
+        const errMsg = data && data.error && typeof data.error.message === 'string' ? data.error.message : (data && typeof data.error === 'string' ? data.error : 'request_failed');
+        sendJson(res, 200, { error: errMsg });
+        return;
+      }
+      const models = Array.isArray(data && data.data)
+        ? data.data.map((m) => (m && typeof m.id === 'string' ? m.id : null)).filter(Boolean)
+        : [];
+      sendJson(res, 200, { models });
+      return;
+    }
+
+    const base = getDefaultBase();
+    if (!base) {
+      sendJson(res, 400, { error: 'invalid_payload', message: 'baseUrl required for custom' });
+      return;
+    }
+    const url = base + '/v1/models';
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: 'Bearer ' + apiKey,
+        'content-type': 'application/json',
+      },
+    });
+    const data = await readJsonSafely(response);
+    if (!response.ok) {
+      const errMsg = data && data.error && typeof data.error.message === 'string' ? data.error.message : (data && data.error && typeof data.error === 'object' && typeof data.error.message === 'string' ? data.error.message : (data && typeof data.error === 'string' ? data.error : 'request_failed'));
+      sendJson(res, 200, { error: errMsg });
+      return;
+    }
+    const raw = Array.isArray(data && data.data) ? data.data : [];
+    const models = raw
+      .map((m) => (m && typeof m.id === 'string' ? m.id : null))
+      .filter(Boolean)
+      .sort();
+    sendJson(res, 200, { models });
+  } catch (err) {
+    console.error('POST /api/llm/models/list failed:', err.message);
+    sendJson(res, 200, { error: 'request_failed' });
+  }
+});
+
 app.post('/api/llm/chat', async (req, res) => {
-  const user = requireAuth(req, res);
+  const user = requireAuth(req, res, LLM_ROLES);
   if (!user) {
     return;
   }
@@ -5742,14 +7782,80 @@ app.post('/api/llm/chat', async (req, res) => {
     return;
   }
 
-  const resolved = resolveLlmProviderAndModel(parsed.value);
-  if (resolved.error) {
-    sendJson(res, 400, { error: resolved.error });
-    return;
+  let resolved = null;
+  let userSetting = null;
+  const userSettingRow = await getLlmUserSettingForPurpose(user.id, parsed.value.purpose);
+  if (userSettingRow && userSettingRow.model) {
+    const prov = (userSettingRow.provider || '').toLowerCase();
+    const hasKey = userSettingRow.api_key || (prov === 'anthropic' && ANTHROPIC_API_KEY);
+    if (hasKey) {
+      userSetting = userSettingRow;
+      resolved = { value: { provider: prov, model: userSettingRow.model } };
+    }
+  }
+  if (!resolved) {
+    resolved = resolveLlmProviderAndModel(parsed.value);
+    if (resolved.error) {
+      sendJson(res, 400, { error: resolved.error });
+      return;
+    }
+  }
+  if (userSetting && resolved.value.model !== userSetting.model) {
+    resolved.value.model = userSetting.model;
   }
 
-  if (resolved.value.provider !== 'anthropic') {
-    sendJson(res, 400, { error: 'invalid_payload' });
+  const provider = resolved.value.provider;
+  const startedAt = Date.now();
+  const messageMeta = getLlmMessageMeta(parsed.value.messages);
+
+  if (provider !== 'anthropic') {
+    const openAiResult = await sendOpenAiCompatibleChat(parsed.value, resolved.value, userSetting);
+    if (openAiResult.error) {
+      sendJson(res, openAiResult.statusCode || 502, { error: openAiResult.error });
+      return;
+    }
+    const inputTokens = openAiResult.inputTokens;
+    const outputTokens = openAiResult.outputTokens;
+    const costEstimateUsd = estimateLlmCostUsd(provider, resolved.value.model, inputTokens, outputTokens);
+    const requestMeta = { ...messageMeta, params: parsed.value.params || {}, worker_used: false };
+    const responseMeta = {
+      worker_used: false,
+      latency_ms: Date.now() - startedAt,
+      provider_http_status: openAiResult.statusCode || 200,
+      response_id: openAiResult.responseId || null,
+      stop_reason: openAiResult.stopReason || null,
+    };
+    let requestId;
+    try {
+      requestId = await writeLlmRequest({
+        projectId: parsed.value.project_id || null,
+        actorUserId: user.id,
+        purpose: parsed.value.purpose,
+        provider,
+        model: resolved.value.model,
+        requestMeta,
+        responseMeta,
+        inputTokens: inputTokens ?? null,
+        outputTokens: outputTokens ?? null,
+        costEstimateUsd: costEstimateUsd,
+        status: 'ok',
+        errorCode: null,
+      });
+    } catch (err) {
+      console.error('LLM request audit write failed:', err.message);
+      sendJson(res, 500, { error: 'internal_error' });
+      return;
+    }
+    const usage = {};
+    if (inputTokens != null) usage.input_tokens = inputTokens;
+    if (outputTokens != null) usage.output_tokens = outputTokens;
+    sendJson(res, 200, {
+      text: openAiResult.text || '',
+      provider,
+      model: resolved.value.model,
+      usage,
+      request_id: requestId,
+    });
     return;
   }
 
@@ -5759,12 +7865,10 @@ app.post('/api/llm/chat', async (req, res) => {
     return;
   }
 
-  const startedAt = Date.now();
-  const messageMeta = getLlmMessageMeta(parsed.value.messages);
   const requestMeta = {
     ...messageMeta,
     params: {
-      max_tokens: anthropicRequest.value.max_tokens,
+      max_tokens: anthropicRequest.value.max_tokens ?? anthropicRequest.value.max_completion_tokens,
       ...(anthropicRequest.value.temperature !== undefined
         ? { temperature: anthropicRequest.value.temperature }
         : {}),
@@ -5775,7 +7879,7 @@ app.post('/api/llm/chat', async (req, res) => {
   let providerStatusCode = null;
   let workerUsed = Boolean(CLOUDFLARE_WORKER_URL);
 
-  if (!ANTHROPIC_API_KEY) {
+  if (!ANTHROPIC_API_KEY && !(userSetting && userSetting.api_key)) {
     const responseMeta = {
       worker_used: workerUsed,
       latency_ms: Date.now() - startedAt,
@@ -5848,12 +7952,24 @@ app.post('/api/llm/chat', async (req, res) => {
       return;
     }
 
-    sendJson(res, 502, { error: 'llm_unavailable' });
+    sendJson(res, 502, {
+      error: 'llm_unavailable',
+      hint: 'missing_api_key',
+    });
     return;
   }
 
   try {
-    const providerResult = await sendAnthropicRequest(anthropicRequest.value);
+    const requestOptions = userSetting
+      ? {
+          apiKey: userSetting.api_key || ANTHROPIC_API_KEY,
+          baseUrl: userSetting.base_url || undefined,
+        }
+      : undefined;
+    const providerResult = await sendAnthropicRequest(
+      anthropicRequest.value,
+      requestOptions
+    );
     providerStatusCode = providerResult.statusCode;
     workerUsed = providerResult.workerUsed;
 
@@ -5916,11 +8032,20 @@ app.post('/api/llm/chat', async (req, res) => {
         return;
       }
 
-      sendJson(res, 502, { error: 'llm_unavailable' });
+      sendJson(res, 502, {
+        error: 'llm_unavailable',
+        hint: 'provider_error',
+      });
       return;
     }
 
     const text = extractAnthropicText(providerResult.body);
+    const costEstimateUsd = estimateLlmCostUsd(
+      resolved.value.provider,
+      resolved.value.model,
+      inputTokens,
+      outputTokens
+    );
     let requestId;
     try {
       requestId = await writeLlmRequest({
@@ -5933,7 +8058,7 @@ app.post('/api/llm/chat', async (req, res) => {
         responseMeta,
         inputTokens,
         outputTokens,
-        costEstimateUsd: null,
+        costEstimateUsd: costEstimateUsd,
         status: 'ok',
         errorCode: null,
       });
@@ -5998,7 +8123,10 @@ app.post('/api/llm/chat', async (req, res) => {
     }
 
     if (isAppError(error) && error.errorCode === 'llm_unavailable') {
-      sendJson(res, 502, { error: 'llm_unavailable' });
+      sendJson(res, 502, {
+        error: 'llm_unavailable',
+        hint: error.hint || 'provider_error',
+      });
       return;
     }
 
@@ -6006,6 +8134,478 @@ app.post('/api/llm/chat', async (req, res) => {
     if (isDevelopment() && error.stack) {
       console.error(error.stack);
     }
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.post('/api/llm/settings/test', async (req, res) => {
+  const user = requireAuth(req, res, LLM_ROLES);
+  if (!user) return;
+
+  const body = req.body || {};
+  const provider =
+    typeof body.provider === 'string' ? body.provider.trim().toLowerCase() : '';
+  const model = typeof body.model === 'string' ? body.model.trim() : '';
+  const apiKey =
+    typeof body.apiKey === 'string'
+      ? body.apiKey.trim()
+      : typeof body.api_key === 'string'
+        ? body.api_key.trim()
+        : '';
+  const baseUrl =
+    typeof body.baseUrl === 'string' ? body.baseUrl.trim().replace(/\/+$/, '') : '';
+
+  const allowed = ['anthropic', 'openai', 'deepseek', 'groq', 'custom'];
+  if (!provider || !allowed.includes(provider)) {
+    sendJson(res, 400, { ok: false, error: 'Недопустимый провайдер' });
+    return;
+  }
+  if (!model) {
+    sendJson(res, 400, { ok: false, error: 'Укажите модель' });
+    return;
+  }
+  if (!apiKey) {
+    sendJson(res, 400, { ok: false, error: 'Укажите API-ключ' });
+    return;
+  }
+  const hasNonAscii = /[^\x00-\x7F]/.test(apiKey);
+  if (hasNonAscii) {
+    sendJson(res, 400, { ok: false, error: 'API-ключ содержит недопустимые символы. Скопируйте ключ заново, убедитесь что не попали лишние символы.' });
+    return;
+  }
+  if (provider === 'custom' && !baseUrl) {
+    sendJson(res, 400, { ok: false, error: 'Для custom укажите baseUrl' });
+    return;
+  }
+
+  const getDefaultBase = () => {
+    switch (provider) {
+      case 'anthropic':
+        return 'https://api.anthropic.com';
+      case 'openai':
+        return 'https://api.openai.com';
+      case 'deepseek':
+        return 'https://api.deepseek.com';
+      case 'groq':
+        return 'https://api.groq.com/openai';
+      default:
+        return baseUrl || '';
+    }
+  };
+  const base = baseUrl || getDefaultBase();
+  if (!base) {
+    sendJson(res, 400, { ok: false, error: 'Не задан baseUrl' });
+    return;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    if (provider === 'anthropic') {
+      const endpoint = `${base}/v1/messages`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': ANTHROPIC_API_VERSION,
+        },
+        body: JSON.stringify({
+          model,
+          max_completion_tokens: 5,
+          messages: [{ role: 'user', content: 'Say hi' }],
+        }),
+      });
+      clearTimeout(timeout);
+      const data = await readJsonSafely(response);
+      if (!response.ok) {
+        const errMsg =
+          data && data.error && typeof data.error.message === 'string'
+            ? data.error.message
+            : data && typeof data.error === 'string'
+              ? data.error
+              : `HTTP ${response.status}`;
+        sendJson(res, 200, { ok: false, error: errMsg });
+        return;
+      }
+      sendJson(res, 200, { ok: true, model });
+      return;
+    }
+
+    const endpoint = `${base}/v1/chat/completions`;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'content-type': 'application/json',
+        Authorization: 'Bearer ' + apiKey,
+      },
+      body: JSON.stringify({
+        model,
+        max_completion_tokens: 5,
+        messages: [{ role: 'user', content: 'Say hi' }],
+      }),
+    });
+    clearTimeout(timeout);
+    const data = await readJsonSafely(response);
+    if (!response.ok) {
+      const errMsg =
+        data && data.error && typeof data.error.message === 'string'
+          ? data.error.message
+          : data && data.error && typeof data.error === 'object' && typeof data.error.message === 'string'
+            ? data.error.message
+            : data && typeof data.error === 'string'
+              ? data.error
+              : `HTTP ${response.status}`;
+      sendJson(res, 200, { ok: false, error: errMsg });
+      return;
+    }
+    sendJson(res, 200, { ok: true, model });
+  } catch (err) {
+    clearTimeout(timeout);
+    const msg = err.name === 'AbortError' ? 'Таймаут запроса' : (err.message || 'Ошибка запроса');
+    sendJson(res, 200, { ok: false, error: msg });
+  }
+});
+
+// ── Assignable users (for project responsible selection) ─────────────
+
+app.get('/api/assignable-users', async (req, res) => {
+  const user = requireAuth(req, res, PROJECT_WRITE_ROLES);
+  if (!user) return;
+  try {
+    const result = await db.query(
+      `SELECT id, email FROM users WHERE status = 'active' ORDER BY email ASC`
+    );
+    sendJson(res, 200, { users: result.rows });
+  } catch (error) {
+    console.error('GET /api/assignable-users failed:', error.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+// ── Admin: User management ──────────────────────────────────────────
+
+app.get('/api/admin/users', async (req, res) => {
+  const user = requireAuth(req, res, ADMIN_ONLY);
+  if (!user) return;
+  try {
+    const result = await db.query(
+      `SELECT id, email, role, status, created_at, updated_at FROM users ORDER BY created_at ASC`
+    );
+    sendJson(res, 200, { users: result.rows });
+  } catch (error) {
+    console.error('GET /api/admin/users failed:', error.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.post('/api/admin/users', async (req, res) => {
+  const user = requireAuth(req, res, ADMIN_ONLY);
+  if (!user) return;
+  const { email, password, role } = req.body || {};
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
+    sendJson(res, 400, { error: 'invalid_email' }); return;
+  }
+  if (!password || typeof password !== 'string' || password.length < 6) {
+    sendJson(res, 400, { error: 'password_too_short' }); return;
+  }
+  const validRoles = ['admin', 'manager'];
+  if (!role || !validRoles.includes(role)) {
+    sendJson(res, 400, { error: 'invalid_role' }); return;
+  }
+  try {
+    const exists = await db.query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [email.trim()]);
+    if (exists.rowCount > 0) {
+      sendJson(res, 409, { error: 'email_already_exists' }); return;
+    }
+    const passwordHash = hashPassword(password);
+    const result = await db.query(
+      `INSERT INTO users (email, password_hash, role, status) VALUES ($1, $2, $3, 'active') RETURNING id, email, role, status, created_at`,
+      [email.trim().toLowerCase(), passwordHash, role]
+    );
+    sendJson(res, 201, { user: result.rows[0] });
+  } catch (error) {
+    console.error('POST /api/admin/users failed:', error.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.patch('/api/admin/users/:id', async (req, res) => {
+  const user = requireAuth(req, res, ADMIN_ONLY);
+  if (!user) return;
+  const { id } = req.params;
+  if (!isUuid(id)) { sendJson(res, 400, { error: 'invalid_user_id' }); return; }
+  const { email, role, status, password } = req.body || {};
+  try {
+    const existing = await db.query('SELECT id, email, role FROM users WHERE id = $1', [id]);
+    if (existing.rowCount === 0) { sendJson(res, 404, { error: 'user_not_found' }); return; }
+    const sets = [];
+    const vals = [];
+    if (email && typeof email === 'string' && email.includes('@')) {
+      sets.push(`email = $${vals.push(email.trim().toLowerCase())}`);
+    }
+    const validRoles = ['admin', 'manager'];
+    if (role && validRoles.includes(role)) {
+      sets.push(`role = $${vals.push(role)}`);
+    }
+    if (status && ['active', 'disabled'].includes(status)) {
+      sets.push(`status = $${vals.push(status)}`);
+    }
+    if (password && typeof password === 'string' && password.length >= 6) {
+      sets.push(`password_hash = $${vals.push(hashPassword(password))}`);
+    }
+    if (sets.length === 0) { sendJson(res, 400, { error: 'nothing_to_update' }); return; }
+    sets.push(`updated_at = NOW()`);
+    vals.push(id);
+    const result = await db.query(
+      `UPDATE users SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING id, email, role, status, created_at, updated_at`,
+      vals
+    );
+    sendJson(res, 200, { user: result.rows[0] });
+  } catch (error) {
+    console.error('PATCH /api/admin/users/:id failed:', error.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.post('/api/admin/users/:id/transfer', async (req, res) => {
+  const user = requireAuth(req, res, ADMIN_ONLY);
+  if (!user) return;
+  const { id } = req.params;
+  const { target_user_id } = req.body || {};
+  if (!isUuid(id) || !isUuid(target_user_id)) {
+    sendJson(res, 400, { error: 'invalid_user_id' }); return;
+  }
+  if (id === target_user_id) {
+    sendJson(res, 400, { error: 'cannot_transfer_to_self' }); return;
+  }
+  try {
+    const source = await db.query('SELECT id FROM users WHERE id = $1', [id]);
+    const target = await db.query('SELECT id FROM users WHERE id = $1', [target_user_id]);
+    if (source.rowCount === 0) { sendJson(res, 404, { error: 'source_user_not_found' }); return; }
+    if (target.rowCount === 0) { sendJson(res, 404, { error: 'target_user_not_found' }); return; }
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('UPDATE projects SET responsible_user_id = $1 WHERE responsible_user_id = $2', [target_user_id, id]);
+      await client.query('UPDATE projects SET created_by = $1 WHERE created_by = $2', [target_user_id, id]);
+      await client.query('UPDATE tasks SET assignee_user_id = $1 WHERE assignee_user_id = $2', [target_user_id, id]);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+    sendJson(res, 200, { ok: true });
+  } catch (error) {
+    console.error('POST /api/admin/users/:id/transfer failed:', error.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.delete('/api/admin/users/:id', async (req, res) => {
+  const user = requireAuth(req, res, ADMIN_ONLY);
+  if (!user) return;
+  const { id } = req.params;
+  if (!isUuid(id)) { sendJson(res, 400, { error: 'invalid_user_id' }); return; }
+  if (id === user.id) { sendJson(res, 400, { error: 'cannot_delete_self' }); return; }
+  try {
+    const existing = await db.query('SELECT id, email FROM users WHERE id = $1', [id]);
+    if (existing.rowCount === 0) { sendJson(res, 404, { error: 'user_not_found' }); return; }
+    const ownedProjects = await db.query('SELECT id FROM projects WHERE responsible_user_id = $1 OR created_by = $1 LIMIT 1', [id]);
+    const ownedTasks = await db.query('SELECT id FROM tasks WHERE assignee_user_id = $1 LIMIT 1', [id]);
+    if (ownedProjects.rowCount > 0 || ownedTasks.rowCount > 0) {
+      sendJson(res, 409, { error: 'transfer_required', message: 'Transfer projects and tasks before deleting user' }); return;
+    }
+    await db.query('DELETE FROM user_active_projects WHERE user_id = $1', [id]);
+    await db.query('DELETE FROM llm_provider_settings WHERE user_id = $1', [id]);
+    await db.query('DELETE FROM users WHERE id = $1', [id]);
+    sendJson(res, 200, { ok: true, deleted_user_id: id });
+  } catch (error) {
+    console.error('DELETE /api/admin/users/:id failed:', error.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+// ── Admin: Assign project responsibility ─────────────────────────────
+
+app.patch('/projects/:id/assign', async (req, res) => {
+  const user = requireAuth(req, res, ADMIN_ONLY);
+  if (!user) return;
+  const { id } = req.params;
+  const { responsible_user_id } = req.body || {};
+  if (!isUuid(id)) { sendJson(res, 400, { error: 'invalid_project_id' }); return; }
+  if (responsible_user_id !== null && !isUuid(responsible_user_id)) {
+    sendJson(res, 400, { error: 'invalid_user_id' }); return;
+  }
+  try {
+    if (responsible_user_id) {
+      const userExists = await db.query('SELECT id FROM users WHERE id = $1', [responsible_user_id]);
+      if (userExists.rowCount === 0) { sendJson(res, 404, { error: 'user_not_found' }); return; }
+    }
+    const result = await db.query(
+      `UPDATE projects SET responsible_user_id = $1, updated_at = NOW() WHERE id = $2
+       RETURNING id, name, responsible_user_id, created_by, stages, stage_settings, created_at, updated_at`,
+      [responsible_user_id, id]
+    );
+    if (result.rowCount === 0) { sendJson(res, 404, { error: 'project_not_found' }); return; }
+    sendJson(res, 200, { project: result.rows[0] });
+  } catch (error) {
+    console.error('PATCH /projects/:id/assign failed:', error.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+// ── Admin: Data deletion endpoints ───────────────────────────────────
+
+app.delete('/api/admin/data/events', async (req, res) => {
+  const user = requireAuth(req, res, ADMIN_ONLY);
+  if (!user) return;
+  try {
+    await db.query('DELETE FROM task_events');
+    sendJson(res, 200, { ok: true });
+  } catch (error) {
+    console.error('DELETE /api/admin/data/events failed:', error.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.delete('/api/admin/data/trash', async (req, res) => {
+  const user = requireAuth(req, res, ADMIN_ONLY);
+  if (!user) return;
+  try {
+    await ensureTaskTrashStorage();
+    await db.query('DELETE FROM task_trash');
+    sendJson(res, 200, { ok: true });
+  } catch (error) {
+    console.error('DELETE /api/admin/data/trash failed:', error.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.delete('/api/admin/data/llm-stats', async (req, res) => {
+  const user = requireAuth(req, res, ADMIN_ONLY);
+  if (!user) return;
+  try {
+    await db.query('DELETE FROM llm_requests');
+    sendJson(res, 200, { ok: true });
+  } catch (error) {
+    console.error('DELETE /api/admin/data/llm-stats failed:', error.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.delete('/api/admin/data/projects', async (req, res) => {
+  const user = requireAuth(req, res, ADMIN_ONLY);
+  if (!user) return;
+  try {
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM task_chats');
+      await client.query('DELETE FROM task_events');
+      await client.query('DELETE FROM task_trash');
+      await client.query('DELETE FROM import_events');
+      await client.query('DELETE FROM import_jobs');
+      await client.query('DELETE FROM project_timers');
+      await client.query('DELETE FROM user_active_projects');
+      await client.query('DELETE FROM tasks');
+      await client.query('DELETE FROM projects');
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+    sendJson(res, 200, { ok: true });
+  } catch (error) {
+    console.error('DELETE /api/admin/data/projects failed:', error.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.delete('/api/admin/data/all-stats', async (req, res) => {
+  const user = requireAuth(req, res, ADMIN_ONLY);
+  if (!user) return;
+  try {
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM task_events');
+      await client.query('DELETE FROM task_trash');
+      await client.query('DELETE FROM llm_requests');
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+    sendJson(res, 200, { ok: true });
+  } catch (error) {
+    console.error('DELETE /api/admin/data/all-stats failed:', error.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.delete('/api/admin/account', async (req, res) => {
+  const user = requireAuth(req, res, ADMIN_ONLY);
+  if (!user) return;
+  const { confirm_email } = req.body || {};
+  if (!confirm_email || confirm_email !== user.email) {
+    sendJson(res, 400, { error: 'confirmation_mismatch', message: 'Type your email to confirm account deletion' });
+    return;
+  }
+  try {
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM user_active_projects WHERE user_id = $1', [user.id]);
+      await client.query('DELETE FROM llm_provider_settings WHERE user_id = $1', [user.id]);
+      await client.query('UPDATE projects SET responsible_user_id = NULL WHERE responsible_user_id = $1', [user.id]);
+      await client.query('UPDATE tasks SET assignee_user_id = NULL WHERE assignee_user_id = $1', [user.id]);
+      await client.query('DELETE FROM users WHERE id = $1', [user.id]);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+    sendJson(res, 200, { ok: true });
+  } catch (error) {
+    console.error('DELETE /api/admin/account failed:', error.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+// ── Auth: Change own password ────────────────────────────────────────
+
+app.post('/auth/change-password', async (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) return;
+  const { current_password, new_password } = req.body || {};
+  if (!current_password || !new_password) {
+    sendJson(res, 400, { error: 'missing_fields' }); return;
+  }
+  if (typeof new_password !== 'string' || new_password.length < 6) {
+    sendJson(res, 400, { error: 'password_too_short' }); return;
+  }
+  try {
+    const result = await db.query('SELECT password_hash FROM users WHERE id = $1', [user.id]);
+    if (result.rowCount === 0) { sendJson(res, 404, { error: 'user_not_found' }); return; }
+    if (!verifyPassword(current_password, result.rows[0].password_hash)) {
+      sendJson(res, 403, { error: 'wrong_password' }); return;
+    }
+    await db.query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [hashPassword(new_password), user.id]);
+    sendJson(res, 200, { ok: true });
+  } catch (error) {
+    console.error('POST /auth/change-password failed:', error.message);
     sendJson(res, 500, { error: 'internal_error' });
   }
 });
@@ -6055,8 +8655,40 @@ app.use((error, req, res, next) => {
   sendJson(res, 500, { error: 'internal_error' });
 });
 
-app.listen(PORT, () => {
+async function refreshLlmPricingCache() {
+  try {
+    const result = await fetchAndStoreLlmPrices(db);
+    if (result.error) {
+      console.warn('[LLM] pricing fetch failed:', result.error);
+    } else if (result.updated > 0) {
+      console.log('[LLM] pricing updated:', result.updated, 'models');
+    }
+    const cache = await loadPricingCache(db);
+    llmPricingCache = cache;
+  } catch (err) {
+    console.warn('[LLM] pricing refresh failed:', err.message);
+  }
+}
+
+async function initLlmPricing() {
+  try {
+    llmPricingCache = await loadPricingCache(db);
+    if (llmPricingCache.size === 0) {
+      await refreshLlmPricingCache();
+    }
+  } catch (err) {
+    console.warn('[LLM] pricing init failed (using fallback):', err.message);
+  }
+}
+
+const LLM_PRICES_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+app.listen(PORT, async () => {
   console.log(`API listening on http://localhost:${PORT}`);
+  console.log('[LLM] ANTHROPIC_API_KEY:', ANTHROPIC_API_KEY ? 'set' : 'not set');
+  if (CLOUDFLARE_WORKER_URL) {
+    console.log('[LLM] CLOUDFLARE_WORKER_URL: set (requests go to worker)');
+  }
   logDbStartupDiagnostics();
   checkDbConnectivity().catch((error) => {
     console.error('[db] connectivity check failed unexpectedly: %s', error.message);
@@ -6064,4 +8696,6 @@ app.listen(PORT, () => {
       console.error(error.stack);
     }
   });
+  initLlmPricing().catch(() => {});
+  setInterval(() => refreshLlmPricingCache().catch(() => {}), LLM_PRICES_REFRESH_INTERVAL_MS);
 });

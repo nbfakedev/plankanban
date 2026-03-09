@@ -39,6 +39,7 @@
 - agent (nullable)
 - priority (int)
 - hours (numeric)
+- size (text, nullable; XS|S|M|L|XL — объём задачи)
 - descript (text, nullable, max 5000 chars; CHECK constraint)
 - notes (text)
 - deps (text/json)
@@ -59,6 +60,17 @@
 Используется для аналитики проекта/задач:
 - created/updated/moved/reordered/deleted task metrics
 - cycle time и weekly throughput через SQL-агрегации по `event_type` + `payload`
+
+## task_chats (персистентный чат техлида по задаче)
+- id (uuid, PK)
+- task_id (uuid, FK -> tasks.id, ON DELETE CASCADE)
+- role (text: user|assistant)
+- content (text)
+- action (jsonb, nullable) — предложенное изменение задачи { field: value } для PATCH
+- action_applied (boolean, default false)
+- created_at (timestamptz)
+
+Индекс: task_id, created_at.
 
 ## task_trash
 - id (uuid, PK)
@@ -81,6 +93,18 @@
 - deleted_by_user_id (nullable)
 - created_at (original task created_at)
 - updated_at
+## llm_model_pricing
+- id (uuid)
+- provider (text)
+- model_id (text)
+- model_display_name (text)
+- input_price_per_1m, output_price_per_1m (numeric)
+- input_cached_price_per_1m (numeric, nullable)
+- source, fetched_at, updated_at
+- UNIQUE(provider, model_id)
+
+Загружается из llm-prices.com (скрипт `npm run llm:prices:fetch`, автообновление раз в сутки).
+
 ## llm_requests
 - id (uuid)
 - project_id (uuid, nullable)

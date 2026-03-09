@@ -16,7 +16,7 @@
   --bg:#080b12;--bg2:#0e1420;
   --sf:rgba(255,255,255,.04);--sf2:rgba(255,255,255,.07);--sf3:rgba(255,255,255,.12);
   --bd:rgba(255,255,255,.08);--bd2:rgba(255,255,255,.14);--bd3:rgba(255,255,255,.22);
-  --tx:#f0ede8;--tx2:#8a97b0;--tx3:#424d62;--tx4:#2a3347;
+  --tx:#f0ede8;--tx2:#9ca8c2;--tx3:#525d75;--tx4:#363f52;
   --sh:0 4px 24px rgba(0,0,0,.5);--sh-lg:0 20px 70px rgba(0,0,0,.75);
   --hbg:rgba(8,11,18,.93);--mbg:rgba(10,14,22,.97);
 }
@@ -437,17 +437,31 @@ body::before {
 <script>
 // ── THEME ──
 (function () {
-  const saved = localStorage.getItem('mossb_theme') || 'dark';
-  document.documentElement.setAttribute('data-theme', saved);
-  document.getElementById('theme-btn').textContent = saved === 'dark' ? '☀️' : '🌙';
+  var saved = localStorage.getItem('mossb_theme') || 'dark';
+  function resolveLoginTheme() {
+    if (saved === 'system') return window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light';
+    return saved;
+  }
+  function applyLoginTheme() {
+    var eff = resolveLoginTheme();
+    document.documentElement.setAttribute('data-theme', eff);
+    document.getElementById('theme-btn').textContent = eff === 'dark' ? '☀️' : '🌙';
+  }
+  applyLoginTheme();
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change', function () { if (saved === 'system') applyLoginTheme(); });
+  }
 })();
 
 function toggleTheme() {
-  const current = document.documentElement.getAttribute('data-theme');
-  const next = current === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
-  localStorage.setItem('mossb_theme', next);
-  document.getElementById('theme-btn').textContent = next === 'dark' ? '☀️' : '🌙';
+  var cur = localStorage.getItem('mossb_theme') || 'dark';
+  if (cur === 'dark') cur = 'light';
+  else if (cur === 'light') cur = 'system';
+  else cur = 'dark';
+  localStorage.setItem('mossb_theme', cur);
+  var eff = cur === 'system' ? (window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches ? 'dark' : 'light') : cur;
+  document.documentElement.setAttribute('data-theme', eff);
+  document.getElementById('theme-btn').textContent = eff === 'dark' ? '☀️' : '🌙';
 }
 
 // ── AUTH CHECK: если уже залогинен — редиректим на / ──

@@ -7,6 +7,8 @@ services:
     volumes:
       - .:/usr/src/app:delegated
     command: sh -c "npm install && npm run dev"
+    env_file:
+      - .env
     environment:
       - PORT=3000
   db:
@@ -19,6 +21,5 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-
 volumes:
   pgdata:

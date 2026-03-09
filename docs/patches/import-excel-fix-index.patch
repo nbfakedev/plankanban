@@ -1,0 +1,10 @@
+--- a/apps/web/index.html
++++ b/apps/web/index.html
+@@ -1997,7 +1997,7 @@
+       <div style="display:flex;flex-direction:column;gap:6px;flex:1;">
+         <div id="imp-status" style="font-size:11px;color:var(--tx3);font-family:'DM Mono',monospace;"></div>
+-        <div id="imp-big-file-hint" style="display:none;font-size:11px;color:var(--tx2);">Большой файл — используется быстрая модель</div>
++        <div id="imp-big-file-hint" style="display:none;font-size:11px;color:var(--tx2);">Файл большой — будет обработано первые ~250 строк</div>
+         <label class="import-new-project-label" style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--tx2);cursor:pointer;">
+           <input type="checkbox" id="import-create-new-project" checked>
+           Создать новый проект

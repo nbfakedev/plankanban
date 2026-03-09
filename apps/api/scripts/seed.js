@@ -1,7 +1,7 @@
 const { createClient } = require('./db');
 const { hashPassword } = require('../lib/password');
 
-const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || 'admin@local.dev';
+const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || 'admin@rootwork.ru';
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'admin123';
 const DEFAULT_PROJECT_NAME = process.env.SEED_DEFAULT_PROJECT || 'Default Project';
 

@@ -151,9 +151,11 @@ POST `/projects`
   "stages": ["A","R1","R1.1","R2","R3+","F"],
   "stage_settings": [
     { "name": "A", "budget": 1000000, "color": "#4a9eff" }
-  ]
+  ],
+  "responsible_user_id": "uuid|null"
 }
 ```
+- `responsible_user_id` (optional): UUID зарегистрированного пользователя — ответственный за проект. По умолчанию используется `created_by`.
 - 201:
 ```json
 {
@@ -215,6 +217,19 @@ PATCH `/projects/:id`
 - 409: `{ "error": "stages_in_use", "stages": [{ "name": "A", "count": 3 }] }`
 - 500: `{ "error": "projects_unavailable" }`
 
+GET `/api/assignable-users`
+- roles: `admin`, `techlead`
+- Возвращает список пользователей для выбора ответственного за проект.
+- 200: `{ "users": [{ "id": "uuid", "email": "string" }, ...] }`
+
+PATCH `/projects/:id/assign`
+- roles: `admin` only
+- Назначить/сменить ответственного за проект. При смене права на метрики, историю и корзину передаются новому ответственному.
+- body: `{ "responsible_user_id": "uuid|null" }`
+- 200: `{ "project": { ... } }`
+- 400: `{ "error": "invalid_project_id|invalid_user_id" }`
+- 404: `{ "error": "project_not_found|user_not_found" }`
+
 DELETE `/projects/:id`
 - roles: `admin`, `techlead`
 - body:
@@ -255,6 +270,11 @@ GET `/projects/active`
 }
 ```
 - 500: `{ "error": "projects_unavailable" }`
+
+POST `/projects/:id/recalculate-duration`
+- roles: `admin`, `techlead`
+- пересчитывает `duration_weeks` из суммы часов задач: `ceil(sum(hours) / 9)` (9 ч/неделю). Вызывается автоматически после импорта.
+- 200: `{ "duration_weeks": N, "project": {...} }`
 
 POST `/projects/activate`
 - roles: `admin`, `techlead`, `employee`
@@ -302,6 +322,7 @@ GET `/projects/:projectId/tasks`
       "agent": "string|null",
       "priority": 0,
       "hours": 1.5,
+      "size": "XS|S|M|L|XL|null",
       "descript": "string|null",
       "notes": "string|null",
       "deps": {},
@@ -380,7 +401,7 @@ POST `/projects/:projectId/tasks`
 
 PATCH `/tasks/:id`
 - roles: `admin`, `techlead`
-- body: any mutable task fields (`title`, `col`/`status`, `stage`, `assignee_user_id`, `track`, `agent`, `priority`, `hours`, `descript`, `description`, `notes`, `deps`)
+- body: any mutable task fields (`title`, `col`/`status`, `stage`, `assignee_user_id`, `track`, `agent`, `priority`, `hours`, `size`, `descript`, `description`, `notes`, `deps`)
 - `descript`: optional `string`, max length `5000`.
 - 200: `{ "task": { ...task } }`
 - 400: `{ "error": "invalid_task_id|invalid_payload" }`
@@ -429,6 +450,60 @@ GET `/tasks/:id/events`
 ```
 - 400: `{ "error": "invalid_task_id" }`
 - 500: `{ "error": "events_unavailable" }`
+
+## Task chat (persistent techlead chat per task)
+
+GET `/tasks/:id/chat`
+- roles: `admin`, `techlead`
+- 200:
+```json
+{
+  "messages": [
+    {
+      "id": "uuid",
+      "role": "user|assistant",
+      "content": "string",
+      "action": { "col": "doing", "stage": "R1" } | null,
+      "action_applied": false,
+      "created_at": "timestamp"
+    }
+  ]
+}
+```
+- 400: `{ "error": "invalid_task_id" }`
+- 404: `{ "error": "task_not_found" }`
+- 500: `{ "error": "chat_unavailable" }`
+
+POST `/tasks/:id/chat`
+- roles: `admin`, `techlead`
+- body: `{ "content": "string" }`
+- Saves user message, calls LLM with task context + history; assistant reply may include suggested task changes in `action` (JSON object of PATCH fields).
+- 200:
+```json
+{
+  "message": {
+    "id": "uuid",
+    "role": "assistant",
+    "content": "string",
+    "action": { "col": "doing" } | null,
+    "action_applied": false,
+    "created_at": "timestamp"
+  }
+}
+```
+- 400: `{ "error": "invalid_task_id|invalid_payload" }`
+- 404: `{ "error": "task_not_found" }`
+- 429: `{ "error": "rate_limited" }`
+- 500: `{ "error": "chat_unavailable" }`
+
+POST `/tasks/:id/chat/apply/:messageId`
+- roles: `admin`, `techlead`
+- Applies the `action` stored on the given chat message to the task (same as PATCH /tasks/:id with those fields), then sets `action_applied=true` on the message.
+- 200: `{ "task": { ...task } }`
+- 400: `{ "error": "invalid_task_id|invalid_payload" }`
+- 404: `{ "error": "task_not_found|message_not_found" }`
+- 409: `{ "error": "action_already_applied" }`
+- 500: `{ "error": "tasks_unavailable" }`
 
 DELETE `/tasks/:id`
 - roles: `admin`, `techlead`

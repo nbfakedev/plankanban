@@ -5,6 +5,7 @@ build
 coverage
 .DS_Store
 *.log
+logs/
 .idea
 .vscode/*
 !.vscode/extensions.json

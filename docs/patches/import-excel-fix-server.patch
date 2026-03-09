@@ -1,0 +1,68 @@
+--- a/apps/api/server.js
++++ b/apps/api/server.js
+@@ -5799,23 +5799,45 @@ app.post('/import/excel', async (req, res) => {
+       return;
+     }
+ 
+-    const systemPrompt =
+-      'Ты парсер задач PlanKanban. Верни только JSON-массив объектов формата: ' +
+-      '[{"title":"...","stage":"...","description":"...","release":"...","notes":"...","priority":0}]. ' +
+-      'Никакого markdown и пояснений.';
++    const MAX_IMPORT_CONTENT = 20000; // ~250 строк Excel
++    const contentLen = parsed.value.content.length;
++    const truncated = contentLen > MAX_IMPORT_CONTENT;
++    const contentToSend = truncated
++      ? parsed.value.content.substring(0, MAX_IMPORT_CONTENT)
++      : parsed.value.content;
++
++    const estimatedTasks = Math.ceil(contentLen / 80);
++    const dynamicMaxTokens = Math.min(
++      Math.max(2000, estimatedTasks * 150),
++      8000
++    );
++
++    const systemPrompt =
++      'Ты — парсер задач. Верни ТОЛЬКО JSON-массив без markdown, без пояснений, без текста до или после. ' +
++      'Формат каждого объекта: {"title":"...","stage":"A","description":"...","priority":0}. ' +
++      'Если задач нет — верни пустой массив []. ' +
++      'Первый символ ответа должен быть [, последний — ].';
+ 
+     let parsedTasks = [];
+     try {
+       const llmText = await requestLlmText({
+         user,
+         purpose: 'import_parse',
+         projectId: project.id,
+         systemPrompt,
+         messages: [
+           {
+             role: 'user',
+-            content: parsed.value.content,
++            content: contentToSend,
+           },
+         ],
+-        maxTokens: 1800,
++        maxTokens: dynamicMaxTokens,
+         temperature: 0.1,
+       });
++      if (isDevelopment()) {
++        console.log('[import] LLM response length:', llmText?.length);
++        console.log('[import] LLM response preview:', llmText?.substring(0, 200));
++      }
+       parsedTasks = normalizeImportedTasks(tryParseJsonBlock(llmText));
+     } catch (error) {
+       if (isAppError(error) && error.errorCode === 'llm_unavailable') {
+@@ -5827,7 +5849,12 @@
+     if (parsedTasks.length === 0) {
+       parsedTasks = fallbackImportTasksFromContent(parsed.value.content);
+     }
+     if (parsedTasks.length === 0) {
+-      sendJson(res, 400, { error: 'empty_import' });
++      sendJson(res, 400, {
++        error: 'empty_import',
++        hint: 'llm_parse_failed',
++        content_length: contentLen,
++        truncated,
++      });
+       return;
+     }

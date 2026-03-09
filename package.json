@@ -7,8 +7,10 @@
     "start": "node --env-file=.env apps/api/server.js",
     "db:migrate": "node --env-file=.env apps/api/scripts/migrate.js",
     "db:rollback": "node --env-file=.env apps/api/scripts/rollback.js",
+    "llm:prices:fetch": "node --env-file=.env apps/api/scripts/fetch-llm-prices.js",
     "db:seed": "node --env-file=.env apps/api/scripts/seed.js",
-    "test:descript": "node --env-file=.env apps/api/scripts/test_descript_validation.js"
+    "test:descript": "node --env-file=.env apps/api/scripts/test_descript_validation.js",
+    "test:smoke": "node scripts/smoke-test.js http://localhost:3000"
   },
   "dependencies": {
     "express": "^4.21.2",
