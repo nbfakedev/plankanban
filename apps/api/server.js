@@ -38,6 +38,7 @@ const TASK_COLUMN_ALIASES = {
   review: 'review',
   done: 'done',
 };
+const NO_STAGE = 'Без этапа';
 const DEFAULT_STAGE_COLOR_PALETTE = [
   '#4a9eff',
   '#a78bfa',
@@ -52,7 +53,7 @@ const TIMER_WRITE_ROLES = ['admin', 'techlead'];
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret_change_me';
 const JWT_TTL_HOURS = Number(process.env.JWT_TTL_HOURS) || 24;
 const JWT_TTL_SECONDS = JWT_TTL_HOURS * 60 * 60;
-const LLM_PURPOSES = ['new_task', 'chat', 'import_parse'];
+const LLM_PURPOSES = ['new_task', 'chat', 'import_parse', 'techlead'];
 const EMPLOYEE_LLM_PURPOSES = ['chat'];
 const SERVICE_ACCOUNT_SCOPES = [
   'tasks:read',
@@ -155,6 +156,14 @@ const GROQ_DEFAULT_MODELS = [
 const QWEN_DEFAULT_MODELS = ['qwen-turbo', 'qwen-plus', 'qwen-max'];
 const GOOGLE_DEFAULT_MODELS = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.0-pro'];
 
+/** Имя параметра лимита токенов: различается по провайдерам. */
+function getMaxTokensParamName(provider) {
+  const p = (provider || '').toLowerCase();
+  if (p === 'openai') return 'max_completion_tokens';
+  if (p === 'anthropic') return 'max_tokens';
+  return 'max_tokens';
+}
+
 const llmRateLimitBuckets = new Map();
 const dbConfigState = createDbConfigFromEnv(process.env);
 const dbConfig = dbConfigState.config;
@@ -238,8 +247,9 @@ function createAppError(statusCode, errorCode, meta) {
   const error = new Error(errorCode);
   error.statusCode = statusCode;
   error.errorCode = errorCode;
-  if (meta && typeof meta === 'object' && meta.hint) {
-    error.hint = meta.hint;
+  if (meta && typeof meta === 'object') {
+    if (meta.hint) error.hint = meta.hint;
+    if (meta.message) error.message = meta.message;
   }
   return error;
 }
@@ -439,7 +449,7 @@ function resolveLlmProviderAndModel(parsedPayload) {
   return { value: { provider, model } };
 }
 
-const LLM_PROVIDER_SETTINGS_PURPOSES = ['import_parse', 'new_task', 'chat'];
+const LLM_PROVIDER_SETTINGS_PURPOSES = ['import_parse', 'new_task', 'chat', 'techlead'];
 const LLM_PROVIDER_SETTINGS_PROVIDERS = ALL_LLM_PROVIDERS;
 
 function parseProviderSettingPayload(payload, forUpdate) {
@@ -498,11 +508,9 @@ async function getLlmBaseConfigForUser(userId) {
       );
       const r = fallback.rows[0];
       if (!r) return null;
-      const apiKey = r.api_key_encrypted ? decryptLlmUserKey(r.api_key_encrypted) : null;
-      return { id: r.id, purpose: r.purpose, provider: r.provider, model: r.model, api_key: apiKey, base_url: r.base_url };
+      return { id: r.id, purpose: r.purpose, provider: r.provider, model: r.model, api_key: null, base_url: r.base_url };
     }
-    const apiKey = row.api_key_encrypted ? decryptLlmUserKey(row.api_key_encrypted) : null;
-    return { id: row.id, purpose: row.purpose, provider: row.provider, model: row.model, api_key: apiKey, base_url: row.base_url };
+    return { id: row.id, purpose: row.purpose, provider: row.provider, model: row.model, api_key: null, base_url: row.base_url };
   } catch (e) {
     return null;
   }
@@ -518,20 +526,33 @@ async function getLlmUserSettingForPurpose(userId, purpose) {
     );
     const row = result.rows[0];
     if (row) {
-      const apiKey = row.api_key_encrypted
-        ? decryptLlmUserKey(row.api_key_encrypted)
-        : null;
       return {
         id: row.id,
         purpose: row.purpose,
         provider: row.provider,
         model: row.model,
-        api_key: apiKey,
+        api_key: null,
         base_url: row.base_url,
       };
     }
     const baseConfig = await getLlmBaseConfigForUser(userId);
     return baseConfig;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function getLlmApiKeyForProvider(userId, provider) {
+  try {
+    const result = await db.query(
+      `SELECT api_key_encrypted, base_url FROM llm_user_api_keys WHERE user_id = $1 AND provider = $2`,
+      [userId, provider]
+    );
+    const row = result.rows[0];
+    if (!row || !row.api_key_encrypted) return null;
+    const apiKey = decryptLlmUserKey(row.api_key_encrypted);
+    if (!apiKey) return null;
+    return { api_key: apiKey, base_url: row.base_url || undefined };
   } catch (e) {
     return null;
   }
@@ -559,11 +580,8 @@ function buildAnthropicRequest(parsedPayload, resolvedModel) {
 
   const params = parsedPayload.params || {};
   const maxVal = params.max_tokens !== undefined ? params.max_tokens : ANTHROPIC_DEFAULT_MAX_TOKENS;
-  const body = {
-    model: resolvedModel,
-    messages: requestMessages,
-    max_completion_tokens: maxVal,
-  };
+  const body = { model: resolvedModel, messages: requestMessages };
+  body[getMaxTokensParamName('anthropic')] = maxVal;
 
   if (params.temperature !== undefined) {
     body.temperature = params.temperature;
@@ -692,7 +710,10 @@ async function writeLlmRequest(params, executor = db) {
 }
 
 async function sendAnthropicRequest(body, options) {
-  const apiKey = (options && options.apiKey) || ANTHROPIC_API_KEY;
+  const apiKey = options && options.apiKey ? options.apiKey : null;
+  if (!apiKey || !apiKey.trim()) {
+    throw createAppError(502, 'llm_unavailable', { hint: 'missing_api_key' });
+  }
   const baseUrlOverride = options && options.baseUrl;
   const workerUsed = Boolean(CLOUDFLARE_WORKER_URL && !baseUrlOverride);
   const endpoint = baseUrlOverride
@@ -795,6 +816,46 @@ function getOpenAiCompatibleBaseUrl(provider, userSetting) {
   }
 }
 
+async function fetchModelsFromProvider(provider, apiKey, baseUrl) {
+  const p = (provider || '').toLowerCase();
+  if (p === 'anthropic') {
+    const response = await fetch('https://api.anthropic.com/v1/models', {
+      method: 'GET',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': ANTHROPIC_API_VERSION,
+        'content-type': 'application/json',
+      },
+    });
+    const data = await readJsonSafely(response);
+    if (!response.ok) return { error: 'request_failed' };
+    const models = Array.isArray(data && data.data)
+      ? data.data.map((m) => (m && typeof m.id === 'string' ? m.id : null)).filter(Boolean)
+      : [];
+    return { models };
+  }
+  const base = baseUrl && baseUrl.trim()
+    ? baseUrl.replace(/\/+$/, '')
+    : getOpenAiCompatibleBaseUrl(provider, { base_url: null });
+  if (!base) return { error: 'invalid_provider_config' };
+  const url = base + '/v1/models';
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: 'Bearer ' + apiKey,
+      'content-type': 'application/json',
+    },
+  });
+  const data = await readJsonSafely(response);
+  if (!response.ok) return { error: 'request_failed' };
+  const raw = Array.isArray(data && data.data) ? data.data : [];
+  const models = raw
+    .map((m) => (m && typeof m.id === 'string' ? m.id : null))
+    .filter(Boolean)
+    .sort();
+  return { models };
+}
+
 async function sendOpenAiCompatibleChat(parsedPayload, resolved, userSetting) {
   const apiKey = userSetting && userSetting.api_key && userSetting.api_key.trim();
   if (!apiKey) {
@@ -820,11 +881,9 @@ async function sendOpenAiCompatibleChat(parsedPayload, resolved, userSetting) {
 
   const params = parsedPayload.params || {};
   const maxVal = params.max_tokens !== undefined ? params.max_tokens : 1024;
-  const body = {
-    model: resolved.model,
-    messages,
-    max_completion_tokens: maxVal,
-  };
+  const provider = resolved && resolved.provider ? resolved.provider : 'openai';
+  const body = { model: resolved.model, messages };
+  body[getMaxTokensParamName(provider)] = maxVal;
   if (params.temperature !== undefined) body.temperature = params.temperature;
 
   const url = `${baseUrl}/v1/chat/completions`;
@@ -846,10 +905,13 @@ async function sendOpenAiCompatibleChat(parsedPayload, resolved, userSetting) {
     const responseBody = await readJsonSafely(res);
 
     if (!res.ok) {
-      const errMsg =
-        (responseBody && (responseBody.error && responseBody.error.message)) ||
-        responseBody ||
-        res.statusText;
+      let errMsg = null;
+      if (responseBody) {
+        if (typeof responseBody.error === 'string') errMsg = responseBody.error;
+        else if (responseBody.error && typeof responseBody.error.message === 'string') errMsg = responseBody.error.message;
+        else if (typeof responseBody.message === 'string') errMsg = responseBody.message;
+      }
+      if (!errMsg) errMsg = res.statusText || 'provider_error';
       return {
         error: typeof errMsg === 'string' ? errMsg : 'provider_error',
         statusCode: res.status,
@@ -1014,7 +1076,7 @@ function normalizeImportedTasks(candidate) {
     const stage =
       typeof item.stage === 'string' && item.stage.trim()
         ? item.stage.trim()
-        : '';
+        : NO_STAGE;
     const description =
       typeof item.description === 'string'
         ? item.description.trim()
@@ -1092,11 +1154,44 @@ function fallbackImportTasksFromContent(content) {
     }
     tasks.push({
       title: line.slice(0, 140),
-      stage: '',
+      stage: NO_STAGE,
       description: line,
       notes: null,
       release: null,
       priority: 0,
+    });
+  }
+
+  return tasks;
+}
+
+/** Virtual import parser for stub mode: rich tasks (stages, priority, size, hours) from line-by-line content. Up to 200 tasks. */
+function virtualImportTasksFromContent(content) {
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+
+  const VIRTUAL_STAGES = ['A', 'R1', 'R2', 'F'];
+  const VIRTUAL_SIZES = ['XS', 'S', 'M', 'L'];
+  const VIRTUAL_HOURS = [2, 4, 8, 16, 24];
+
+  const tasks = [];
+  for (let i = 0; i < Math.min(lines.length, 200); i++) {
+    const line = lines[i];
+    if (line.length < 4) {
+      continue;
+    }
+    tasks.push({
+      title: line.slice(0, 140),
+      stage: VIRTUAL_STAGES[i % VIRTUAL_STAGES.length],
+      description: line,
+      notes: null,
+      release: null,
+      priority: (i % 4) + 1,
+      hours: VIRTUAL_HOURS[i % VIRTUAL_HOURS.length],
+      size: VIRTUAL_SIZES[i % VIRTUAL_SIZES.length],
+      deps: null,
     });
   }
 
@@ -1193,10 +1288,10 @@ async function requestLlmText(params) {
   };
 
   let resolved = null;
-  const userSetting = await getLlmUserSettingForPurpose(params.user.id, params.purpose);
+  let userSetting = await getLlmUserSettingForPurpose(params.user.id, params.purpose);
   if (userSetting && userSetting.model) {
     const prov = (userSetting.provider || '').toLowerCase();
-    const hasKey = userSetting.api_key || (prov === 'anthropic' && ANTHROPIC_API_KEY);
+    const hasKey = Boolean(userSetting.api_key && userSetting.api_key.trim());
     if (hasKey) {
       resolved = { value: { provider: prov, model: userSetting.model } };
     }
@@ -1206,6 +1301,12 @@ async function requestLlmText(params) {
   }
   if (resolved.error) {
     throw createAppError(400, 'invalid_payload');
+  }
+  if (!userSetting) {
+    const keyRow = await getLlmApiKeyForProvider(params.user.id, resolved.value.provider);
+    if (keyRow) {
+      userSetting = { api_key: keyRow.api_key, base_url: keyRow.base_url };
+    }
   }
 
   const provider = resolved.value.provider;
@@ -1277,10 +1378,8 @@ async function requestLlmText(params) {
     throw createAppError(400, anthropicRequest.error);
   }
 
-  const apiKey = (userSetting && userSetting.api_key) || ANTHROPIC_API_KEY;
+  const apiKey = userSetting && userSetting.api_key ? userSetting.api_key : null;
   if (!apiKey) {
-    const status = LLM_STUB_MODE ? 'ok' : 'error';
-    const errorCode = LLM_STUB_MODE ? null : 'missing_api_key';
     await writeLlmRequest({
       projectId: payload.project_id,
       actorUserId: params.user.id,
@@ -1294,19 +1393,20 @@ async function requestLlmText(params) {
         provider_http_status: null,
         response_id: null,
         stop_reason: null,
-        stub: LLM_STUB_MODE,
       },
       inputTokens: 0,
       outputTokens: 0,
       costEstimateUsd: null,
-      status,
-      errorCode,
+      status: 'error',
+      errorCode: 'missing_api_key',
     });
-    if (LLM_STUB_MODE) return 'LLM_STUB_OK';
-    throw createAppError(502, 'llm_unavailable');
+    throw createAppError(502, 'llm_unavailable', { hint: 'missing_api_key' });
   }
 
-  const providerResult = await sendAnthropicRequest(anthropicRequest.value, { apiKey });
+  const providerResult = await sendAnthropicRequest(anthropicRequest.value, {
+    apiKey,
+    baseUrl: userSetting && userSetting.base_url ? userSetting.base_url.trim() : undefined,
+  });
   if (!providerResult.ok) {
     await writeLlmRequest({
       projectId: payload.project_id,
@@ -2080,8 +2180,11 @@ function normalizeProjectStageSettings(rawSettings) {
     return { value: undefined };
   }
 
-  if (!Array.isArray(rawSettings) || rawSettings.length === 0) {
+  if (!Array.isArray(rawSettings)) {
     return { error: 'invalid_payload' };
+  }
+  if (rawSettings.length === 0) {
+    return { value: [] };
   }
 
   const normalized = [];
@@ -2126,6 +2229,159 @@ function normalizeProjectStageSettings(rawSettings) {
   return { value: normalized };
 }
 
+const AGENT_TYPES = ['ai', 'human'];
+
+function normalizeProjectAgentSettings(rawSettings) {
+  if (rawSettings === undefined) {
+    return { value: undefined };
+  }
+  if (rawSettings === null || !Array.isArray(rawSettings)) {
+    return { value: [] };
+  }
+  const normalized = [];
+  const seen = new Set();
+  for (const item of rawSettings) {
+    if (!isObjectPayload(item)) {
+      return { error: 'invalid_payload' };
+    }
+    const name = typeof item.name === 'string' ? item.name.trim() : '';
+    if (!name) {
+      return { error: 'invalid_payload' };
+    }
+    const nameKey = name.toLowerCase();
+    if (seen.has(nameKey)) {
+      continue;
+    }
+    const type = typeof item.type === 'string' ? item.type.trim().toLowerCase() : 'human';
+    if (!AGENT_TYPES.includes(type)) {
+      return { error: 'invalid_payload' };
+    }
+    const color = typeof item.color === 'string' ? item.color.trim() : '';
+    if (!color || !isValidHexColor(color)) {
+      return { error: 'invalid_payload' };
+    }
+    seen.add(nameKey);
+    normalized.push({
+      name,
+      type,
+      color: color.toLowerCase(),
+    });
+  }
+  const NO_AGENT_LABEL = 'Без агента';
+  const hasNoAgent = normalized.some(function (item) { return item.name.toLowerCase() === NO_AGENT_LABEL.toLowerCase(); });
+  if (!hasNoAgent) {
+    normalized.unshift({
+      name: NO_AGENT_LABEL,
+      type: 'ai',
+      color: '#6b7280',
+    });
+  } else {
+    const idx = normalized.findIndex(function (item) { return item.name.toLowerCase() === NO_AGENT_LABEL.toLowerCase(); });
+    if (idx > 0) {
+      const item = normalized.splice(idx, 1)[0];
+      normalized.unshift(item);
+    }
+  }
+  return { value: normalized };
+}
+
+const DEFAULT_PRIORITY_COLORS = { 1: '#6B7280', 2: '#3B82F6', 3: '#F59E0B', 4: '#EF4444' };
+const DEFAULT_PRIORITY_OPTIONS = [
+  { value: 1, label: 'Low', color: '#6B7280' },
+  { value: 2, label: 'Medium', color: '#3B82F6' },
+  { value: 3, label: 'High', color: '#F59E0B' },
+  { value: 4, label: 'Critical', color: '#EF4444' },
+];
+
+const DEFAULT_SIZE_COLORS = { XS: '#6B7280', S: '#3B82F6', M: '#10B981', L: '#F59E0B', XL: '#EF4444' };
+const DEFAULT_SIZE_OPTIONS = [
+  { id: 'XS', label: 'XS', color: '#6B7280' },
+  { id: 'S', label: 'S', color: '#3B82F6' },
+  { id: 'M', label: 'M', color: '#10B981' },
+  { id: 'L', label: 'L', color: '#F59E0B' },
+  { id: 'XL', label: 'XL', color: '#EF4444' },
+];
+
+const DEFAULT_COLUMN_IDS = ['backlog', 'todo', 'doing', 'review', 'done'];
+const LOCKED_COLUMNS = ['backlog', 'done'];
+const DEFAULT_COL_LABELS = { backlog: 'Backlog', todo: 'To Do', doing: 'In Progress', review: 'Review', done: 'Done' };
+
+function buildDefaultColumnSettings() {
+  return DEFAULT_COLUMN_IDS.map(function (cid) {
+    return {
+      id: cid,
+      label: DEFAULT_COL_LABELS[cid] || cid,
+      visible: true,
+      locked: LOCKED_COLUMNS.includes(cid),
+    };
+  });
+}
+
+function normalizePriorityOptions(raw) {
+  if (raw === undefined) return { value: undefined };
+  if (raw === null || !Array.isArray(raw)) return { value: DEFAULT_PRIORITY_OPTIONS };
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    if (!isObjectPayload(item)) return { error: 'invalid_payload' };
+    const v = Number(item.value);
+    if (!Number.isInteger(v) || v < 0) return { error: 'invalid_payload' };
+    const label = typeof item.label === 'string' ? item.label.trim() : '';
+    if (!label) return { error: 'invalid_payload' };
+    if (seen.has(v)) continue;
+    seen.add(v);
+    const color = typeof item.color === 'string' && isValidHexColor(item.color) ? item.color.trim().toLowerCase() : (DEFAULT_PRIORITY_COLORS[v] || '#6B7280');
+    out.push({ value: v, label, color });
+  }
+  return { value: out.length > 0 ? out.sort((a, b) => a.value - b.value) : DEFAULT_PRIORITY_OPTIONS };
+}
+
+function normalizeSizeOptions(raw) {
+  if (raw === undefined) return { value: undefined };
+  if (raw === null || !Array.isArray(raw)) return { value: DEFAULT_SIZE_OPTIONS };
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    if (!isObjectPayload(item)) return { error: 'invalid_payload' };
+    const id = typeof item.id === 'string' ? item.id.trim() : '';
+    if (!id) return { error: 'invalid_payload' };
+    const label = typeof item.label === 'string' ? item.label.trim() : id;
+    const key = id.toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const color = typeof item.color === 'string' && isValidHexColor(item.color) ? item.color.trim().toLowerCase() : (DEFAULT_SIZE_COLORS[key] || '#6B7280');
+    out.push({ id: id.toUpperCase(), label: label || id.toUpperCase(), color });
+  }
+  return { value: out.length > 0 ? out : DEFAULT_SIZE_OPTIONS };
+}
+
+function normalizeColumnSettings(raw) {
+  if (raw === undefined) return { value: undefined };
+  if (raw === null || !Array.isArray(raw)) return { value: undefined };
+  const order = DEFAULT_COLUMN_IDS;
+  const byId = {};
+  for (const item of raw) {
+    if (!isObjectPayload(item)) return { error: 'invalid_payload' };
+    const id = typeof item.id === 'string' ? String(item.id).toLowerCase().trim() : '';
+    if (!id || !order.includes(id)) continue;
+    const label = typeof item.label === 'string' ? item.label.trim() : '';
+    const locked = LOCKED_COLUMNS.includes(id);
+    const visible = locked ? true : (item.visible !== false);
+    byId[id] = { id, label: label || id, visible, locked };
+  }
+  const out = order.map(function (cid) {
+    const existing = byId[cid];
+    if (existing) return existing;
+    return {
+      id: cid,
+      label: DEFAULT_COL_LABELS[cid] || cid,
+      visible: true,
+      locked: LOCKED_COLUMNS.includes(cid),
+    };
+  });
+  return { value: out };
+}
+
 function parseProjectCreatePayload(payload) {
   if (!isObjectPayload(payload)) {
     return { error: 'invalid_payload' };
@@ -2168,6 +2424,18 @@ function parseProjectCreatePayload(payload) {
     return stageSettingsResult;
   }
 
+  const agentSettingsResult = normalizeProjectAgentSettings(payload.agent_settings);
+  if (agentSettingsResult.error) {
+    return agentSettingsResult;
+  }
+
+  const priorityOpts = normalizePriorityOptions(payload.priority_options);
+  if (priorityOpts.error) return priorityOpts;
+  const sizeOpts = normalizeSizeOptions(payload.size_options);
+  if (sizeOpts.error) return sizeOpts;
+  const colOpts = normalizeColumnSettings(payload.column_settings);
+  if (colOpts.error) return colOpts;
+
   const stages =
     stageSettingsResult.value
       ? stageSettingsResult.value.map((item) => item.name)
@@ -2175,9 +2443,19 @@ function parseProjectCreatePayload(payload) {
         ? stagesResult.value
         : [];
 
-  const stageSettings =
+  let stageSettings =
     stageSettingsResult.value ||
     buildDefaultStageSettings(stages, budgetTotal);
+  const hasNoStage = stageSettings.some(
+    (s) => String(s?.name || '').trim().toLowerCase() === NO_STAGE.toLowerCase()
+  );
+  if (!hasNoStage) {
+    stageSettings = [
+      { name: NO_STAGE, budget: 0, color: '#64748b' },
+      ...stageSettings,
+    ];
+  }
+  const stagesFinal = stageSettings.map((s) => s.name);
   const stageSettingsBudgetTotal = stageSettings.reduce(
     (sum, item) => sum + Math.max(0, Math.round(Number(item.budget || 0))),
     0
@@ -2202,8 +2480,12 @@ function parseProjectCreatePayload(payload) {
       name,
       duration_weeks: durationWeeks,
       budget_total: resolvedBudgetTotal,
-      stages,
+      stages: stagesFinal,
       stage_settings: stageSettings,
+      agent_settings: agentSettingsResult.value,
+      priority_options: priorityOpts.value ?? DEFAULT_PRIORITY_OPTIONS,
+      size_options: sizeOpts.value ?? DEFAULT_SIZE_OPTIONS,
+      column_settings: colOpts.value ?? buildDefaultColumnSettings(),
       responsible_user_id: responsibleUserId,
     },
   };
@@ -2277,10 +2559,16 @@ function parseTaskDialogPayload(payload) {
     messages.push({ role, content });
   }
 
+  const provider =
+    typeof payload.provider === 'string' ? payload.provider.trim().toLowerCase() : null;
+  const model = typeof payload.model === 'string' ? payload.model.trim() : null;
+
   return {
     value: {
       project_id: projectId,
       messages,
+      provider: provider || null,
+      model: model || null,
     },
   };
 }
@@ -2309,11 +2597,17 @@ function parseImportExcelPayload(payload) {
       ? payload.file_name.trim()
       : null;
 
+  const provider =
+    typeof payload.provider === 'string' ? payload.provider.trim().toLowerCase() : null;
+  const model = typeof payload.model === 'string' ? payload.model.trim() : null;
+
   return {
     value: {
       project_id: projectId,
       file_name: fileName || null,
       content,
+      provider: provider || null,
+      model: model || null,
     },
   };
 }
@@ -2410,8 +2704,18 @@ function parseTaskCreatePayload(payload) {
     return colResult;
   }
 
+  let task_code = null;
+  if (payload.task_code !== undefined && payload.task_code !== null && payload.task_code !== '') {
+    if (typeof payload.task_code !== 'string') {
+      return { error: 'invalid_payload' };
+    }
+    const code = payload.task_code.trim().slice(0, 10);
+    if (code) task_code = code;
+  }
+
   const updates = {
     title,
+    task_code,
   };
 
   if (colResult.value !== undefined) {
@@ -2490,6 +2794,18 @@ function parseTaskCreatePayload(payload) {
 
   if (payload.deps !== undefined) {
     updates.deps = payload.deps;
+  }
+
+  if (payload.task_code !== undefined) {
+    const raw = payload.task_code;
+    if (raw === null || raw === '') {
+      updates.task_code = null;
+    } else if (typeof raw === 'string') {
+      const code = raw.trim().slice(0, 10);
+      updates.task_code = code || null;
+    } else {
+      return { error: 'invalid_payload' };
+    }
   }
 
   return { value: updates };
@@ -2590,6 +2906,18 @@ function parseTaskPatchPayload(payload) {
 
   if (payload.deps !== undefined) {
     updates.deps = payload.deps;
+  }
+
+  if (payload.task_code !== undefined) {
+    const raw = payload.task_code;
+    if (raw === null || raw === '') {
+      updates.task_code = null;
+    } else if (typeof raw === 'string') {
+      const code = raw.trim().slice(0, 10);
+      updates.task_code = code || null;
+    } else {
+      return { error: 'invalid_payload' };
+    }
   }
 
   if (Object.keys(updates).length === 0) {
@@ -2762,8 +3090,8 @@ async function findProjectById(projectId, executor = db) {
   const result = await executor.query(
     `
       SELECT id, name, created_by, responsible_user_id, llm_provider, llm_model,
-             duration_weeks, budget_total, stages, stage_settings,
-             created_at, updated_at
+             duration_weeks, budget_total, stages, stage_settings, agent_settings,
+             priority_options, size_options, column_settings, history_retention_months, created_at, updated_at
       FROM projects
       WHERE id = $1
       LIMIT 1
@@ -2778,8 +3106,8 @@ async function listVisibleProjectsForUser(user, executor = db) {
     const result = await executor.query(
       `
         SELECT DISTINCT p.id, p.name, p.created_by, p.responsible_user_id, p.llm_provider, p.llm_model,
-               p.duration_weeks, p.budget_total, p.stages, p.stage_settings,
-               p.created_at, p.updated_at
+               p.duration_weeks, p.budget_total, p.stages, p.stage_settings, p.agent_settings,
+               p.priority_options, p.size_options, p.column_settings, p.history_retention_months, p.created_at, p.updated_at
         FROM projects p
         INNER JOIN tasks t ON t.project_id = p.id
         WHERE t.assignee_user_id = $1
@@ -2794,8 +3122,8 @@ async function listVisibleProjectsForUser(user, executor = db) {
     const result = await executor.query(
       `
         SELECT id, name, created_by, responsible_user_id, llm_provider, llm_model,
-               duration_weeks, budget_total, stages, stage_settings,
-               created_at, updated_at
+               duration_weeks, budget_total, stages, stage_settings, agent_settings,
+               priority_options, size_options, column_settings, history_retention_months, created_at, updated_at
         FROM projects
         WHERE responsible_user_id = $1 OR created_by = $1
         ORDER BY created_at DESC
@@ -2808,8 +3136,8 @@ async function listVisibleProjectsForUser(user, executor = db) {
   const result = await executor.query(
     `
       SELECT id, name, created_by, responsible_user_id, llm_provider, llm_model,
-             duration_weeks, budget_total, stages, stage_settings,
-             created_at, updated_at
+             duration_weeks, budget_total, stages, stage_settings, agent_settings,
+             priority_options, size_options, column_settings, history_retention_months, created_at, updated_at
       FROM projects
       ORDER BY created_at DESC
     `
@@ -2822,8 +3150,8 @@ async function findVisibleProjectById(projectId, user) {
     const result = await db.query(
       `
         SELECT p.id, p.name, p.created_by, p.responsible_user_id, p.llm_provider, p.llm_model,
-               p.duration_weeks, p.budget_total, p.stages, p.stage_settings,
-               p.created_at, p.updated_at
+               p.duration_weeks, p.budget_total, p.stages, p.stage_settings, p.agent_settings,
+               p.priority_options, p.size_options, p.column_settings, p.history_retention_months, p.created_at, p.updated_at
         FROM projects p
         WHERE p.id = $1
           AND EXISTS (
@@ -2843,8 +3171,8 @@ async function findVisibleProjectById(projectId, user) {
     const result = await db.query(
       `
         SELECT p.id, p.name, p.created_by, p.responsible_user_id, p.llm_provider, p.llm_model,
-               p.duration_weeks, p.budget_total, p.stages, p.stage_settings,
-               p.created_at, p.updated_at
+               p.duration_weeks, p.budget_total, p.stages, p.stage_settings, p.agent_settings,
+               p.priority_options, p.size_options, p.column_settings, p.history_retention_months, p.created_at, p.updated_at
         FROM projects p
         WHERE p.id = $1 AND (p.responsible_user_id = $2 OR p.created_by = $2)
         LIMIT 1
@@ -2886,8 +3214,8 @@ async function findUserActiveProject(user, executor = db) {
   const result = await executor.query(
     `
       SELECT p.id, p.name, p.created_by, p.responsible_user_id, p.llm_provider, p.llm_model,
-             p.duration_weeks, p.budget_total, p.stages, p.stage_settings,
-             p.created_at, p.updated_at
+             p.duration_weeks, p.budget_total, p.stages, p.stage_settings, p.agent_settings,
+             p.priority_options, p.size_options, p.column_settings, p.history_retention_months, p.created_at, p.updated_at
       FROM user_active_projects ap
       INNER JOIN projects p ON p.id = ap.project_id
       WHERE ap.user_id = $1
@@ -2928,7 +3256,7 @@ async function resolveActiveProjectForUser(user, executor = db) {
 async function findTaskById(taskId, executor = db) {
   const result = await executor.query(
     `
-      SELECT id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+      SELECT id, public_id, project_id, title, task_code, col, stage, assignee_user_id, track, agent,
              priority, hours, size, descript, notes, deps, position, created_at, updated_at
       FROM tasks
       WHERE id = $1
@@ -2937,6 +3265,28 @@ async function findTaskById(taskId, executor = db) {
     [taskId]
   );
   return result.rows[0] || null;
+}
+
+/** Resolve deps.blocks: replace task_code (non-UUID) with task id from same project. */
+async function resolveDepsBlocksForProject(projectId, deps, executor = db) {
+  if (!deps || !deps.blocks || !Array.isArray(deps.blocks) || deps.blocks.length === 0) {
+    return deps;
+  }
+  const resolved = [];
+  for (const idOrCode of deps.blocks) {
+    const s = typeof idOrCode === 'string' ? idOrCode.trim() : '';
+    if (!s) continue;
+    if (isUuid(s)) {
+      resolved.push(s);
+      continue;
+    }
+    const row = await executor.query(
+      'SELECT id FROM tasks WHERE project_id = $1 AND task_code = $2 LIMIT 1',
+      [projectId, s]
+    );
+    if (row.rows[0]) resolved.push(row.rows[0].id);
+  }
+  return { ...deps, blocks: resolved };
 }
 
 async function getNextTaskPosition(projectId, col, executor = db) {
@@ -2952,11 +3302,109 @@ async function getNextTaskPosition(projectId, col, executor = db) {
   return Number((result.rows[0] && result.rows[0].next_position) || 0);
 }
 
+const PRIORITY_LABELS = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Critical' };
+function priorityToLabel(p) {
+  return PRIORITY_LABELS[Number(p)] || String(p ?? 0);
+}
+
+/** Generate project snapshot MD and save to projects. Returns snapshot_md. */
+async function generateProjectSnapshot(projectId, executor = db) {
+  const proj = await executor.query(
+    'SELECT id, name, stages, snapshot_md, snapshot_updated_at FROM projects WHERE id = $1',
+    [projectId]
+  );
+  const project = proj.rows[0];
+  if (!project) return null;
+
+  let tasksWithDeps;
+  try {
+    tasksWithDeps = await executor.query(
+      `
+        SELECT t.id, t.public_id, t.title, t.task_code, t.col, t.stage, t.agent,
+               t.priority, t.descript, t.position,
+               COALESCE(
+                 array_agg(td.depends_on_task_id) FILTER (WHERE td.depends_on_task_id IS NOT NULL),
+                 ARRAY[]::uuid[]
+               ) AS dep_ids
+        FROM tasks t
+        LEFT JOIN task_dependencies td ON td.task_id = t.id
+        WHERE t.project_id = $1
+        GROUP BY t.id
+        ORDER BY t.stage NULLS LAST, t.position NULLS LAST, t.created_at
+      `,
+      [projectId]
+    );
+  } catch (err) {
+    if (err.code === '42P01' && /task_dependencies/.test(err.message)) {
+      return null;
+    }
+    throw err;
+  }
+
+  const tasks = tasksWithDeps.rows || [];
+  const depIds = [...new Set(tasks.flatMap((t) => (t.dep_ids || []).filter(Boolean)))];
+  const idToPublicId = new Map();
+  if (depIds.length > 0) {
+    const mapRes = await executor.query(
+      'SELECT id, public_id FROM tasks WHERE id = ANY($1::uuid[])',
+      [depIds]
+    );
+    for (const r of mapRes.rows || []) {
+      idToPublicId.set(r.id, r.public_id);
+    }
+  }
+
+  const stages = Array.isArray(project.stages) ? project.stages : [];
+  const byStage = new Map();
+  for (const t of tasks) {
+    const stage = (t.stage || '').trim() || '(без этапа)';
+    if (!byStage.has(stage)) byStage.set(stage, []);
+    byStage.get(stage).push(t);
+  }
+  const stageOrder = [...new Set([...stages.map((s) => (s || '').trim()).filter(Boolean), ...byStage.keys()].filter(Boolean))];
+
+  const lines = [];
+  lines.push(`# Проект: ${(project.name || '').trim() || 'Без названия'}`);
+  lines.push(`Этапы: ${stageOrder.length ? stageOrder.join(', ') : '—'}`);
+  lines.push(`Задач: ${tasks.length}`);
+  lines.push(`Обновлено: ${new Date().toISOString()}`);
+  lines.push('');
+
+  for (const stage of stageOrder.length ? stageOrder : [...byStage.keys()]) {
+    const stageTasks = byStage.get(stage) || [];
+    if (stageTasks.length === 0 && stageOrder.includes(stage)) continue;
+    lines.push(`## ${stage}`);
+    lines.push('');
+    for (const t of stageTasks) {
+      const priorityLabel = priorityToLabel(t.priority);
+      const agentStr = (t.agent || '').trim() ? t.agent : '—';
+      lines.push(`- ${t.public_id} | ${(t.title || '').trim() || 'Без названия'} | ${priorityLabel} | ${agentStr}`);
+      if (t.descript && String(t.descript).trim()) {
+        lines.push(`  Описание: ${String(t.descript).trim().replace(/\n/g, ' ').slice(0, 200)}${String(t.descript).length > 200 ? '…' : ''}`);
+      }
+      const depPubIds = (t.dep_ids || [])
+        .map((id) => idToPublicId.get(id))
+        .filter((v) => v != null);
+      if (depPubIds.length > 0) {
+        lines.push(`  Зависит от: ${depPubIds.join(', ')}`);
+      }
+      lines.push('');
+    }
+  }
+
+  const snapshotMd = lines.join('\n').trim();
+  await executor.query(
+    'UPDATE projects SET snapshot_md = $1, snapshot_updated_at = NOW() WHERE id = $2',
+    [snapshotMd, projectId]
+  );
+  return snapshotMd;
+}
+
 async function findTaskInTrashByTaskId(taskId, executor = db) {
   await ensureTaskTrashStorage(executor);
   const result = await executor.query(
     `
-      SELECT id, task_id, public_id, project_id, deleted_project_name, title, col, stage,
+      SELECT id, task_id, public_id, project_id, deleted_project_name, title, task_code, col, stage,
              assignee_user_id, track, agent, priority, hours, size, descript, notes, deps,
              deleted_at, deleted_by_user_id, created_at, updated_at
       FROM task_trash
@@ -3169,6 +3617,7 @@ async function moveTaskRowToTrash(taskRow, options = {}, executor = db) {
         project_id,
         deleted_project_name,
         title,
+        task_code,
         col,
         stage,
         assignee_user_id,
@@ -3186,7 +3635,7 @@ async function moveTaskRowToTrash(taskRow, options = {}, executor = db) {
         updated_at
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), $17, $18, NOW()
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), $18, $19, NOW()
       )
       ON CONFLICT (task_id)
       DO UPDATE SET
@@ -3194,6 +3643,7 @@ async function moveTaskRowToTrash(taskRow, options = {}, executor = db) {
         project_id = EXCLUDED.project_id,
         deleted_project_name = EXCLUDED.deleted_project_name,
         title = EXCLUDED.title,
+        task_code = EXCLUDED.task_code,
         col = EXCLUDED.col,
         stage = EXCLUDED.stage,
         assignee_user_id = EXCLUDED.assignee_user_id,
@@ -3216,6 +3666,7 @@ async function moveTaskRowToTrash(taskRow, options = {}, executor = db) {
       taskRow.project_id || null,
       options.projectName || null,
       taskRow.title,
+      taskRow.task_code ?? null,
       taskRow.col || null,
       taskRow.stage || null,
       taskRow.assignee_user_id || null,
@@ -3273,6 +3724,7 @@ async function writeTaskEvent(params, executor = db) {
 function buildTaskUpdateStatement(updates) {
   const fieldMap = {
     title: 'title',
+    task_code: 'task_code',
     col: 'col',
     position: 'position',
     stage: 'stage',
@@ -3573,6 +4025,7 @@ async function applyAgentTaskCreate(context, payload, actionIndex, executor = db
       INSERT INTO tasks (
         project_id,
         title,
+        task_code,
         col,
         stage,
         assignee_user_id,
@@ -3586,14 +4039,15 @@ async function applyAgentTaskCreate(context, payload, actionIndex, executor = db
         deps
       )
       VALUES (
-        $1, $2, COALESCE($3, 'backlog'), $4, $5, $6, $7, COALESCE($8, 0), $9, $10, $11, $12, $13
+        $1, $2, $3, COALESCE($4, 'backlog'), $5, $6, $7, $8, COALESCE($9, 0), $10, $11, $12, $13, $14
       )
-      RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+      RETURNING id, public_id, project_id, title, task_code, col, stage, assignee_user_id, track, agent,
                 priority, hours, size, descript, notes, deps, created_at, updated_at
     `,
     [
       payload.projectId,
       payload.create.title,
+      payload.create.task_code ?? null,
       payload.create.col || null,
       payload.create.stage ?? null,
       payload.create.assignee_user_id ?? null,
@@ -3914,6 +4368,10 @@ app.get('/projects', async (req, res) => {
     if (isDevelopment() && error.stack) {
       console.error(error.stack);
     }
+    if (error.message && /agent_settings|column.*does not exist/i.test(error.message)) {
+      sendJson(res, 500, { error: 'schema_outdated', hint: 'Выполните миграцию: npm run db:migrate' });
+      return;
+    }
     sendJson(res, 500, { error: 'projects_unavailable' });
   }
 });
@@ -3939,13 +4397,16 @@ app.post('/projects', async (req, res) => {
       sendJson(res, 400, { error: 'invalid_user_id' });
       return;
     }
+    const po = parsed.value.priority_options;
+    const so = parsed.value.size_options;
+    const cs = parsed.value.column_settings;
     const result = await db.query(
       `
-        INSERT INTO projects (name, created_by, responsible_user_id, duration_weeks, budget_total, stages, stage_settings)
-        VALUES ($1, $2, $3, $4, $5, $6::text[], $7::jsonb)
+        INSERT INTO projects (name, created_by, responsible_user_id, duration_weeks, budget_total, stages, stage_settings, agent_settings, priority_options, size_options, column_settings)
+        VALUES ($1, $2, $3, $4, $5, $6::text[], $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb)
         RETURNING id, name, created_by, responsible_user_id, llm_provider, llm_model,
-                  duration_weeks, budget_total, stages, stage_settings,
-                  created_at, updated_at
+                  duration_weeks, budget_total, stages, stage_settings, agent_settings,
+                  priority_options, size_options, column_settings, created_at, updated_at
       `,
       [
         parsed.value.name,
@@ -3955,6 +4416,10 @@ app.post('/projects', async (req, res) => {
         parsed.value.budget_total,
         parsed.value.stages,
         JSON.stringify(parsed.value.stage_settings),
+        JSON.stringify(parsed.value.agent_settings ?? []),
+        JSON.stringify(po != null ? po : DEFAULT_PRIORITY_OPTIONS),
+        JSON.stringify(so != null ? so : DEFAULT_SIZE_OPTIONS),
+        JSON.stringify(cs != null ? cs : buildDefaultColumnSettings()),
       ]
     );
     const project = result.rows[0];
@@ -3985,6 +4450,10 @@ app.get('/projects/active', async (req, res) => {
         budget_total: 0,
         stages: [],
         stage_settings: [],
+        agent_settings: [],
+        priority_options: null,
+        size_options: null,
+        column_settings: null,
       });
       return;
     }
@@ -3998,11 +4467,22 @@ app.get('/projects/active', async (req, res) => {
       stage_settings: Array.isArray(active.stage_settings)
         ? active.stage_settings
         : [],
+      agent_settings: Array.isArray(active.agent_settings)
+        ? active.agent_settings
+        : [],
+      priority_options: active.priority_options != null ? active.priority_options : null,
+      size_options: active.size_options != null ? active.size_options : null,
+      column_settings: active.column_settings != null ? active.column_settings : null,
+      history_retention_months: active.history_retention_months != null ? Number(active.history_retention_months) : null,
     });
   } catch (error) {
     console.error('GET /projects/active failed:', error.message);
     if (isDevelopment() && error.stack) {
       console.error(error.stack);
+    }
+    if (error.message && /agent_settings|column.*does not exist/i.test(error.message)) {
+      sendJson(res, 500, { error: 'schema_outdated', hint: 'Выполните миграцию: npm run db:migrate' });
+      return;
     }
     sendJson(res, 500, { error: 'projects_unavailable' });
   }
@@ -4043,6 +4523,91 @@ app.post('/projects/activate', async (req, res) => {
       console.error(error.stack);
     }
     sendJson(res, 500, { error: 'projects_unavailable' });
+  }
+});
+
+app.get('/projects/:id/snapshot', async (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  const { id } = req.params;
+  if (!isUuid(id)) {
+    sendJson(res, 400, { error: 'invalid_project_id' });
+    return;
+  }
+
+  try {
+    const project = await findVisibleProjectById(id, user);
+    if (!project) {
+      sendJson(res, 404, { error: 'project_not_found' });
+      return;
+    }
+
+    const snapRow = await db.query(
+      'SELECT snapshot_md, snapshot_updated_at FROM projects WHERE id = $1',
+      [id]
+    );
+    let snapshotMd = snapRow.rows[0]?.snapshot_md ?? null;
+    let snapshotUpdatedAt = snapRow.rows[0]?.snapshot_updated_at ?? null;
+
+    if (snapshotMd == null || snapshotMd === '') {
+      snapshotMd = await generateProjectSnapshot(id);
+      if (snapshotMd != null) {
+        const updated = await db.query(
+          'SELECT snapshot_md, snapshot_updated_at FROM projects WHERE id = $1',
+          [id]
+        );
+        snapshotUpdatedAt = updated.rows[0]?.snapshot_updated_at ?? new Date().toISOString();
+      }
+    }
+
+    sendJson(res, 200, { snapshot_md: snapshotMd, snapshot_updated_at: snapshotUpdatedAt });
+  } catch (error) {
+    console.error('GET /projects/:id/snapshot failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'snapshot_unavailable' });
+  }
+});
+
+app.post('/projects/:id/snapshot/refresh', async (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  const { id } = req.params;
+  if (!isUuid(id)) {
+    sendJson(res, 400, { error: 'invalid_project_id' });
+    return;
+  }
+
+  try {
+    const project = await findVisibleProjectById(id, user);
+    if (!project) {
+      sendJson(res, 404, { error: 'project_not_found' });
+      return;
+    }
+
+    const snapshotMd = await generateProjectSnapshot(id);
+    const updated = await db.query(
+      'SELECT snapshot_md, snapshot_updated_at FROM projects WHERE id = $1',
+      [id]
+    );
+    const row = updated.rows[0] || {};
+    sendJson(res, 200, {
+      snapshot_md: row.snapshot_md ?? snapshotMd,
+      snapshot_updated_at: row.snapshot_updated_at,
+    });
+  } catch (error) {
+    console.error('POST /projects/:id/snapshot/refresh failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'snapshot_unavailable' });
   }
 });
 
@@ -4103,28 +4668,70 @@ app.patch('/projects/:id', async (req, res) => {
     const normalizedStages = parsed.value.stages.map((stage) =>
       String(stage).trim().toLowerCase()
     );
-    const stageUsage = await db.query(
-      `
-        SELECT stage, COUNT(*)::int AS count
-        FROM tasks
-        WHERE project_id = $1
-          AND stage IS NOT NULL
-          AND lower(stage) <> ALL($2::text[])
-        GROUP BY stage
-        ORDER BY count DESC
-      `,
-      [id, normalizedStages]
-    );
-    if (stageUsage.rowCount > 0) {
-      sendJson(res, 409, {
-        error: 'stages_in_use',
-        stages: stageUsage.rows.map((row) => ({
-          name: row.stage,
-          count: Number(row.count || 0),
-        })),
-      });
-      return;
+    if (normalizedStages.length > 0) {
+      const stageUsage = await db.query(
+        `
+          SELECT stage, COUNT(*)::int AS count
+          FROM tasks
+          WHERE project_id = $1
+            AND stage IS NOT NULL
+            AND trim(stage) <> ''
+            AND lower(trim(stage)) <> ALL($2::text[])
+          GROUP BY stage
+          ORDER BY count DESC
+        `,
+        [id, normalizedStages]
+      );
+      if (stageUsage.rowCount > 0) {
+        sendJson(res, 409, {
+          error: 'stages_in_use',
+          stages: stageUsage.rows.map((row) => ({
+            name: row.stage,
+            count: Number(row.count || 0),
+          })),
+        });
+        return;
+      }
     }
+
+    const agentSettings = parsed.value.agent_settings !== undefined
+      ? parsed.value.agent_settings
+      : (Array.isArray(existing.agent_settings) ? existing.agent_settings : []);
+
+    const columnSettings = parsed.value.column_settings;
+    if (columnSettings && Array.isArray(columnSettings)) {
+      const toHide = columnSettings.filter(function (c) {
+        return c && !c.locked && c.visible === false;
+      });
+      if (toHide.length > 0) {
+        const colIds = toHide.map(function (c) { return c.id; });
+        const apiColMap = { backlog: 'backlog', todo: 'todo', doing: 'doing', inprogress: 'doing', in_progress: 'doing', review: 'review', done: 'done' };
+        const apiCols = colIds.map(function (c) { return apiColMap[c] || c; });
+        const taskCount = await db.query(
+          `SELECT col, COUNT(*)::int AS cnt FROM tasks WHERE project_id = $1 AND col = ANY($2::text[]) GROUP BY col`,
+          [id, apiCols]
+        );
+        if (taskCount.rowCount > 0) {
+          const details = taskCount.rows.map(function (r) { return r.col + ': ' + r.cnt; });
+          sendJson(res, 409, {
+            error: 'column_has_tasks',
+            message: 'В колонках есть задачи. Сначала освободите колонки или перенесите задачи.',
+            columns: taskCount.rows,
+          });
+          return;
+        }
+      }
+    }
+
+    const priorityOptions = parsed.value.priority_options !== undefined
+      ? parsed.value.priority_options
+      : (existing.priority_options || DEFAULT_PRIORITY_OPTIONS);
+    const sizeOptions = parsed.value.size_options !== undefined
+      ? parsed.value.size_options
+      : (existing.size_options || DEFAULT_SIZE_OPTIONS);
+    const finalColumnSettings = columnSettings !== undefined
+      ? columnSettings
+      : (existing.column_settings || buildDefaultColumnSettings());
 
     const result = await db.query(
       `
@@ -4134,11 +4741,15 @@ app.patch('/projects/:id', async (req, res) => {
             budget_total = $3,
             stages = $4::text[],
             stage_settings = $5::jsonb,
+            agent_settings = $6::jsonb,
+            priority_options = $8::jsonb,
+            size_options = $9::jsonb,
+            column_settings = $10::jsonb,
             updated_at = NOW()
-        WHERE id = $6
+        WHERE id = $7
         RETURNING id, name, created_by, responsible_user_id, llm_provider, llm_model,
-                  duration_weeks, budget_total, stages, stage_settings,
-                  created_at, updated_at
+                  duration_weeks, budget_total, stages, stage_settings, agent_settings,
+                  priority_options, size_options, column_settings, created_at, updated_at
       `,
       [
         parsed.value.name,
@@ -4146,7 +4757,11 @@ app.patch('/projects/:id', async (req, res) => {
         parsed.value.budget_total,
         parsed.value.stages,
         JSON.stringify(parsed.value.stage_settings),
+        JSON.stringify(agentSettings),
         id,
+        JSON.stringify(priorityOptions),
+        JSON.stringify(sizeOptions),
+        JSON.stringify(finalColumnSettings),
       ]
     );
 
@@ -4237,6 +4852,7 @@ app.delete('/projects/:id', async (req, res) => {
             project_id,
             deleted_project_name,
             title,
+            task_code,
             col,
             stage,
             assignee_user_id,
@@ -4259,6 +4875,7 @@ app.delete('/projects/:id', async (req, res) => {
             t.project_id,
             $2,
             t.title,
+            t.task_code,
             t.col,
             t.stage,
             t.assignee_user_id,
@@ -4282,6 +4899,7 @@ app.delete('/projects/:id', async (req, res) => {
             project_id = EXCLUDED.project_id,
             deleted_project_name = EXCLUDED.deleted_project_name,
             title = EXCLUDED.title,
+            task_code = EXCLUDED.task_code,
             col = EXCLUDED.col,
             stage = EXCLUDED.stage,
             assignee_user_id = EXCLUDED.assignee_user_id,
@@ -4375,8 +4993,16 @@ app.get('/projects/:projectId/events', async (req, res) => {
       where.push(`te.actor_user_id = $${values.push(user.id)}`);
     }
 
-    if (req.query.event_type) {
-      where.push(`te.event_type = $${values.push(req.query.event_type)}`);
+    const eventTypesParam = req.query.event_types || req.query.event_type;
+    if (eventTypesParam) {
+      const types = typeof eventTypesParam === 'string'
+        ? eventTypesParam.split(',').map((s) => s.trim()).filter(Boolean)
+        : Array.isArray(eventTypesParam) ? eventTypesParam.filter(Boolean) : [];
+      if (types.length === 1) {
+        where.push(`te.event_type = $${values.push(types[0])}`);
+      } else if (types.length > 1) {
+        where.push(`te.event_type = ANY($${values.push(types)}::text[])`);
+      }
     }
     if (req.query.from) {
       const fromDate = new Date(req.query.from);
@@ -4407,8 +5033,10 @@ app.get('/projects/:projectId/events', async (req, res) => {
 
     const result = await db.query(
       `
-        SELECT te.event_type, te.payload, te.actor_user_id, te.task_id, te.created_at
+        SELECT te.event_type, te.payload, te.actor_user_id, te.task_id, te.created_at, te.before, te.after,
+               u.email AS actor_email
         FROM task_events te
+        LEFT JOIN users u ON u.id = te.actor_user_id
         WHERE ${where.join(' AND ')}
         ORDER BY te.created_at DESC, te.id DESC
         LIMIT $${limitIdx}
@@ -4424,6 +5052,73 @@ app.get('/projects/:projectId/events', async (req, res) => {
       console.error(error.stack);
     }
     sendJson(res, 500, { error: 'events_unavailable' });
+  }
+});
+
+app.post('/projects/:projectId/history-retention', async (req, res) => {
+  const user = requireAuth(req, res, PROJECT_WRITE_ROLES);
+  if (!user) {
+    return;
+  }
+
+  const { projectId } = req.params;
+  if (!isUuid(projectId)) {
+    sendJson(res, 400, { error: 'invalid_project_id' });
+    return;
+  }
+
+  const retention = req.body?.retention_months;
+  let retentionMonths = null;
+  if (retention === 3 || retention === '3') {
+    retentionMonths = 3;
+  } else if (retention === 6 || retention === '6') {
+    retentionMonths = 6;
+  } else if (retention === null || retention === undefined || retention === 'all' || retention === '') {
+    retentionMonths = null;
+  } else {
+    sendJson(res, 400, { error: 'invalid_payload', message: 'retention_months: 3, 6 or null (keep all)' });
+    return;
+  }
+
+  try {
+    const project = await findVisibleProjectById(projectId, user);
+    if (!project) {
+      sendJson(res, 404, { error: 'project_not_found' });
+      return;
+    }
+
+    await db.query(
+      'UPDATE projects SET history_retention_months = $1, updated_at = NOW() WHERE id = $2',
+      [retentionMonths, projectId]
+    );
+
+    let deletedCount = 0;
+    if (retentionMonths) {
+      const cutoff = new Date();
+      cutoff.setMonth(cutoff.getMonth() - retentionMonths);
+      const cutoffIso = cutoff.toISOString();
+      const del = await db.query(
+        'DELETE FROM task_events WHERE project_id = $1 AND created_at < $2',
+        [projectId, cutoffIso]
+      );
+      deletedCount = del.rowCount || 0;
+    }
+
+    const updated = await findProjectById(projectId);
+    sendJson(res, 200, {
+      project: updated,
+      deleted_events: deletedCount,
+    });
+  } catch (error) {
+    if (error.message && /column.*does not exist/i.test(error.message)) {
+      sendJson(res, 500, { error: 'schema_outdated', hint: 'Выполните миграцию: npm run db:migrate' });
+      return;
+    }
+    console.error('POST /projects/:projectId/history-retention failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'history_retention_unavailable' });
   }
 });
 
@@ -4592,7 +5287,7 @@ app.get('/projects/:projectId/tasks', async (req, res) => {
     if (user.role === 'employee') {
       result = await db.query(
         `
-          SELECT id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+          SELECT id, public_id, project_id, title, task_code, col, stage, assignee_user_id, track, agent,
                  priority, hours, size, descript, notes, deps, position, created_at, updated_at
           FROM tasks
           WHERE project_id = $1
@@ -4604,7 +5299,7 @@ app.get('/projects/:projectId/tasks', async (req, res) => {
     } else {
       result = await db.query(
         `
-          SELECT id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+          SELECT id, public_id, project_id, title, task_code, col, stage, assignee_user_id, track, agent,
                  priority, hours, size, descript, notes, deps, position, created_at, updated_at
           FROM tasks
           WHERE project_id = $1
@@ -4658,11 +5353,13 @@ app.post('/projects/:projectId/tasks', async (req, res) => {
     const task = await runInTransaction(async (tx) => {
       const targetCol = payload.col || 'backlog';
       const nextPosition = await getNextTaskPosition(projectId, targetCol, tx);
+      const resolvedDeps = await resolveDepsBlocksForProject(projectId, payload.deps ?? null, tx);
       const created = await tx.query(
         `
           INSERT INTO tasks (
             project_id,
             title,
+            task_code,
             col,
             position,
             stage,
@@ -4677,17 +5374,18 @@ app.post('/projects/:projectId/tasks', async (req, res) => {
             deps
           )
           VALUES (
-            $1, $2, COALESCE($3, 'backlog'), $4, $5, $6, $7, $8, COALESCE($9, 0), $10, $11, $12, $13, $14
+            $1, $2, $3, COALESCE($4, 'backlog'), $5, $6, $7, $8, $9, COALESCE($10, 0), $11, $12, $13, $14, $15
           )
-          RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+          RETURNING id, public_id, project_id, title, task_code, col, stage, assignee_user_id, track, agent,
                     priority, hours, size, descript, notes, deps, position, created_at, updated_at
         `,
         [
           projectId,
           payload.title,
+          payload.task_code ?? null,
           payload.col || null,
           nextPosition,
-          payload.stage ?? null,
+          (payload.stage && String(payload.stage).trim()) ? payload.stage.trim() : NO_STAGE,
           payload.assignee_user_id ?? null,
           payload.track ?? null,
           payload.agent ?? null,
@@ -4696,7 +5394,7 @@ app.post('/projects/:projectId/tasks', async (req, res) => {
           payload.size && ['XS','S','M','L','XL'].includes(String(payload.size).trim().toUpperCase()) ? String(payload.size).trim().toUpperCase() : null,
           payload.descript ?? null,
           payload.notes ?? null,
-          payload.deps ?? null,
+          resolvedDeps,
         ]
       );
 
@@ -4723,7 +5421,14 @@ app.post('/projects/:projectId/tasks', async (req, res) => {
     });
 
     sendJson(res, 201, { task });
+    generateProjectSnapshot(projectId).catch((err) =>
+      console.error('[snapshot] failed:', err.message)
+    );
   } catch (error) {
+    if (error && error.code === '23505') {
+      sendJson(res, 400, { error: 'task_code_duplicate', message: 'ID задачи уже используется в этом проекте' });
+      return;
+    }
     if (error && (error.code === '23503' || error.code === '23514')) {
       sendJson(res, 400, { error: 'invalid_payload' });
       return;
@@ -4821,10 +5526,15 @@ app.patch('/tasks/reorder', async (req, res) => {
         );
       }
 
-      return { column, updated: order.length };
+      return { column, updated: order.length, projectId: existing.rows[0].project_id };
     });
 
-    sendJson(res, 200, result);
+    sendJson(res, 200, { column: result.column, updated: result.updated });
+    if (result.projectId) {
+      generateProjectSnapshot(result.projectId).catch((err) =>
+        console.error('[snapshot] failed:', err.message)
+      );
+    }
   } catch (error) {
     if (isAppError(error)) {
       sendJson(res, error.statusCode, { error: error.errorCode });
@@ -4865,6 +5575,9 @@ app.patch('/tasks/:id', async (req, res) => {
       }
 
       const updates = { ...parsed.value };
+      if (updates.deps !== undefined) {
+        updates.deps = await resolveDepsBlocksForProject(before.project_id, updates.deps, tx);
+      }
       if (
         updates.col !== undefined &&
         updates.col !== null &&
@@ -4884,7 +5597,7 @@ app.patch('/tasks/:id', async (req, res) => {
           UPDATE tasks
           SET ${update.setClause}
           WHERE id = $${update.values.length + 1}
-          RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+          RETURNING id, public_id, project_id, title, task_code, col, stage, assignee_user_id, track, agent,
                     priority, hours, size, descript, notes, deps, position, created_at, updated_at
         `,
         [...update.values, id]
@@ -4911,12 +5624,19 @@ app.patch('/tasks/:id', async (req, res) => {
     });
 
     sendJson(res, 200, { task: after });
+    generateProjectSnapshot(after.project_id).catch((err) =>
+      console.error('[snapshot] failed:', err.message)
+    );
   } catch (error) {
     if (isAppError(error)) {
       sendJson(res, error.statusCode, { error: error.errorCode });
       return;
     }
 
+    if (error && error.code === '23505') {
+      sendJson(res, 400, { error: 'task_code_duplicate', message: 'ID задачи уже используется в этом проекте' });
+      return;
+    }
     if (error && (error.code === '23503' || error.code === '23514')) {
       sendJson(res, 400, { error: 'invalid_payload' });
       return;
@@ -4994,7 +5714,10 @@ function parseTaskChatPostPayload(payload) {
   if (!content) {
     return { error: 'invalid_payload' };
   }
-  return { value: { content } };
+  const provider =
+    typeof payload.provider === 'string' ? payload.provider.trim().toLowerCase() : null;
+  const model = typeof payload.model === 'string' ? payload.model.trim() : null;
+  return { value: { content, provider: provider || null, model: model || null } };
 }
 
 function extractActionFromTechleadResponse(text) {
@@ -5013,6 +5736,225 @@ function extractActionFromTechleadResponse(text) {
   const cleanText = text.replace(/\s*ACTION_JSON::\s*\{[\s\S]*\}\s*$/, '').trim();
   return { text: cleanText, action };
 }
+
+app.get('/tasks/:id/dependencies', async (req, res) => {
+  const user = requireAuth(req, res);
+  if (!user) {
+    return;
+  }
+
+  const { id } = req.params;
+  if (!isUuid(id)) {
+    sendJson(res, 400, { error: 'invalid_task_id' });
+    return;
+  }
+
+  try {
+    const task = await findTaskById(id);
+    if (!task) {
+      sendJson(res, 404, { error: 'task_not_found' });
+      return;
+    }
+
+    const project = await findVisibleProjectById(task.project_id, user);
+    if (!project) {
+      sendJson(res, 404, { error: 'project_not_found' });
+      return;
+    }
+
+    const deps = await db.query(
+      `
+        SELECT t.id, t.public_id, t.title, t.col, t.stage
+        FROM task_dependencies td
+        INNER JOIN tasks t ON t.id = td.depends_on_task_id
+        WHERE td.task_id = $1
+      `,
+      [id]
+    );
+
+    sendJson(res, 200, deps.rows);
+  } catch (error) {
+    if (error && error.code === '42P01') {
+      sendJson(res, 200, []);
+      return;
+    }
+    console.error('GET /tasks/:id/dependencies failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'dependencies_unavailable' });
+  }
+});
+
+app.post('/tasks/:id/dependencies', async (req, res) => {
+  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  if (!user) {
+    return;
+  }
+
+  const { id } = req.params;
+  if (!isUuid(id)) {
+    sendJson(res, 400, { error: 'invalid_task_id' });
+    return;
+  }
+
+  const body = req.body || {};
+  const dependsOnTaskId = typeof body.depends_on_task_id === 'string' ? body.depends_on_task_id.trim() : null;
+  if (!dependsOnTaskId || !isUuid(dependsOnTaskId)) {
+    sendJson(res, 400, { error: 'invalid_payload' });
+    return;
+  }
+
+  if (id === dependsOnTaskId) {
+    sendJson(res, 400, { error: 'invalid_payload', message: 'Задача не может зависеть от самой себя' });
+    return;
+  }
+
+  try {
+    const task = await findTaskById(id);
+    if (!task) {
+      sendJson(res, 404, { error: 'task_not_found' });
+      return;
+    }
+
+    const depTask = await findTaskById(dependsOnTaskId);
+    if (!depTask || depTask.project_id !== task.project_id) {
+      sendJson(res, 404, { error: 'depends_on_task_not_found' });
+      return;
+    }
+
+    const project = await findVisibleProjectById(task.project_id, user);
+    if (!project) {
+      sendJson(res, 404, { error: 'project_not_found' });
+      return;
+    }
+
+    const reachable = await db.query(
+      `
+        WITH RECURSIVE reachable AS (
+          SELECT depends_on_task_id AS node
+          FROM task_dependencies
+          WHERE task_id = $1
+          UNION
+          SELECT td.depends_on_task_id
+          FROM task_dependencies td
+          INNER JOIN reachable r ON td.task_id = r.node
+        )
+        SELECT node FROM reachable
+      `,
+      [dependsOnTaskId]
+    );
+    const wouldCreateCycle = (reachable.rows || []).some((r) => r.node && String(r.node) === id);
+    if (wouldCreateCycle) {
+      sendJson(res, 409, { error: 'cyclic_dependency', message: 'Добавление зависимости создаст цикл' });
+      return;
+    }
+
+    const inserted = await db.query(
+      `
+        INSERT INTO task_dependencies (task_id, depends_on_task_id)
+        VALUES ($1, $2)
+        ON CONFLICT (task_id, depends_on_task_id) DO NOTHING
+        RETURNING id, task_id, depends_on_task_id, created_at
+      `,
+      [id, dependsOnTaskId]
+    );
+
+    if (inserted.rowCount === 0) {
+      sendJson(res, 200, {
+        dependency: { task_id: id, depends_on_task_id: dependsOnTaskId },
+        already_exists: true,
+      });
+      return;
+    }
+
+    const row = inserted.rows[0];
+    sendJson(res, 201, {
+      id: row.id,
+      task_id: row.task_id,
+      depends_on_task_id: row.depends_on_task_id,
+      created_at: row.created_at,
+    });
+
+    generateProjectSnapshot(task.project_id).catch((err) =>
+      console.error('[snapshot] failed:', err.message)
+    );
+  } catch (error) {
+    if (error && error.code === '42P01') {
+      sendJson(res, 500, { error: 'schema_outdated', hint: 'Выполните миграцию: npm run db:migrate' });
+      return;
+    }
+    if (error && error.code === '23503') {
+      sendJson(res, 404, { error: 'depends_on_task_not_found' });
+      return;
+    }
+    if (error && error.code === '23505') {
+      sendJson(res, 409, { error: 'already_exists' });
+      return;
+    }
+    console.error('POST /tasks/:id/dependencies failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'dependencies_unavailable' });
+  }
+});
+
+app.delete('/tasks/:id/dependencies/:depId', async (req, res) => {
+  const user = requireAuth(req, res, TASK_WRITE_ROLES);
+  if (!user) {
+    return;
+  }
+
+  const { id, depId } = req.params;
+  if (!isUuid(id) || !isUuid(depId)) {
+    sendJson(res, 400, { error: 'invalid_payload' });
+    return;
+  }
+
+  try {
+    const task = await findTaskById(id);
+    if (!task) {
+      sendJson(res, 404, { error: 'task_not_found' });
+      return;
+    }
+
+    const project = await findVisibleProjectById(task.project_id, user);
+    if (!project) {
+      sendJson(res, 404, { error: 'project_not_found' });
+      return;
+    }
+
+    const deleted = await db.query(
+      `
+        DELETE FROM task_dependencies
+        WHERE task_id = $1 AND depends_on_task_id = $2
+      `,
+      [id, depId]
+    );
+
+    if (deleted.rowCount === 0) {
+      sendJson(res, 404, { error: 'dependency_not_found' });
+      return;
+    }
+
+    sendNoContent(res);
+
+    generateProjectSnapshot(task.project_id).catch((err) =>
+      console.error('[snapshot] failed:', err.message)
+    );
+  } catch (error) {
+    if (error && error.code === '42P01') {
+      sendJson(res, 500, { error: 'schema_outdated', hint: 'Выполните миграцию: npm run db:migrate' });
+      return;
+    }
+    console.error('DELETE /tasks/:id/dependencies/:depId failed:', error.message);
+    if (isDevelopment() && error.stack) {
+      console.error(error.stack);
+    }
+    sendJson(res, 500, { error: 'dependencies_unavailable' });
+  }
+});
 
 app.get('/tasks/:id/chat', async (req, res) => {
   const user = requireAuth(req, res, TASK_WRITE_ROLES);
@@ -5143,10 +6085,14 @@ app.post('/tasks/:id/chat', async (req, res) => {
         messages,
         maxTokens: 700,
         temperature: 0.2,
+        provider: parsed.value.provider || undefined,
+        model: parsed.value.model || undefined,
       });
     } catch (llmError) {
       if (isAppError(llmError)) {
-        sendJson(res, llmError.statusCode, { error: llmError.errorCode });
+        const body = { error: llmError.errorCode };
+        if (llmError.hint) body.hint = llmError.hint;
+        sendJson(res, llmError.statusCode, body);
         return;
       }
       throw llmError;
@@ -5260,7 +6206,7 @@ app.post('/tasks/:id/chat/apply/:messageId', async (req, res) => {
           UPDATE tasks
           SET ${update.setClause}
           WHERE id = $${update.values.length + 1}
-          RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+          RETURNING id, public_id, project_id, title, task_code, col, stage, assignee_user_id, track, agent,
                     priority, hours, size, descript, notes, deps, position, created_at, updated_at
         `,
         [...update.values, taskId]
@@ -5368,10 +6314,16 @@ app.delete('/tasks/:id', async (req, res) => {
       return {
         deleted_task_id: before.id,
         deleted_public_id: before.public_id,
+        project_id: before.project_id,
       };
     });
 
-    sendJson(res, 200, result);
+    sendJson(res, 200, { deleted_task_id: result.deleted_task_id, deleted_public_id: result.deleted_public_id });
+    if (result.project_id) {
+      generateProjectSnapshot(result.project_id).catch((err) =>
+        console.error('[snapshot] failed:', err.message)
+      );
+    }
   } catch (error) {
     if (isAppError(error)) {
       sendJson(res, error.statusCode, { error: error.errorCode });
@@ -5580,6 +6532,7 @@ app.post('/tasks/:id/restore', async (req, res) => {
             public_id,
             project_id,
             title,
+            task_code,
             col,
             position,
             stage,
@@ -5596,9 +6549,9 @@ app.post('/tasks/:id/restore', async (req, res) => {
             updated_at
           )
           VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, 0), $12, $13, $14, $15, $16, $17, NOW()
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12, 0), $13, $14, $15, $16, $17, $18, NOW()
           )
-          RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+          RETURNING id, public_id, project_id, title, task_code, col, stage, assignee_user_id, track, agent,
                     priority, hours, size, descript, notes, deps, position, created_at, updated_at
         `,
         [
@@ -5606,6 +6559,7 @@ app.post('/tasks/:id/restore', async (req, res) => {
           trashed.public_id,
           parsed.value.project_id,
           trashed.title,
+          trashed.task_code ?? null,
           parsed.value.col,
           restorePosition,
           parsed.value.stage,
@@ -5648,6 +6602,9 @@ app.post('/tasks/:id/restore', async (req, res) => {
     });
 
     sendJson(res, 200, { task: restored });
+    generateProjectSnapshot(restored.project_id).catch((err) =>
+      console.error('[snapshot] failed:', err.message)
+    );
   } catch (error) {
     if (isAppError(error)) {
       sendJson(res, error.statusCode, { error: error.errorCode });
@@ -5744,6 +6701,24 @@ app.post('/tasks/:id/move', async (req, res) => {
       }
 
       const targetCol = parsed.value.col;
+      const movingToInProgress = targetCol === 'doing' || targetCol === 'todo';
+      if (movingToInProgress && before.deps && before.deps.blocks && Array.isArray(before.deps.blocks) && before.deps.blocks.length > 0) {
+        const blockIds = before.deps.blocks.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim());
+        if (blockIds.length > 0) {
+          const notDone = await tx.query(
+            `
+              SELECT id, task_code FROM tasks
+              WHERE project_id = $1 AND id = ANY($2::uuid[]) AND (col IS NULL OR col != 'done')
+            `,
+            [before.project_id, blockIds]
+          );
+          if (notDone.rows.length > 0) {
+            const codes = notDone.rows.map((r) => r.task_code || r.id).join(', ');
+            throw createAppError(409, 'task_blocked_by_deps', { message: `Задача заблокирована: выполните зависимости (${codes})` });
+          }
+        }
+      }
+
       const currentPosition = Number.isFinite(Number(before.position))
         ? Number(before.position)
         : 0;
@@ -5759,7 +6734,7 @@ app.post('/tasks/:id/move', async (req, res) => {
               position = $2,
               updated_at = NOW()
           WHERE id = $3
-          RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+          RETURNING id, public_id, project_id, title, task_code, col, stage, assignee_user_id, track, agent,
                     priority, hours, size, descript, notes, deps, position, created_at, updated_at
         `,
         [targetCol, targetPosition, id]
@@ -5787,9 +6762,14 @@ app.post('/tasks/:id/move', async (req, res) => {
     });
 
     sendJson(res, 200, { task: after });
+    generateProjectSnapshot(after.project_id).catch((err) =>
+      console.error('[snapshot] failed:', err.message)
+    );
   } catch (error) {
     if (isAppError(error)) {
-      sendJson(res, error.statusCode, { error: error.errorCode });
+      const body = { error: error.errorCode };
+      if (error.message) body.message = error.message;
+      sendJson(res, error.statusCode, body);
       return;
     }
 
@@ -6355,6 +7335,8 @@ app.post('/llm/task-dialog', async (req, res) => {
       messages: parsed.value.messages,
       maxTokens: 700,
       temperature: 0.1,
+      provider: parsed.value.provider || undefined,
+      model: parsed.value.model || undefined,
     });
     const candidate = tryParseJsonBlock(llmText);
     const normalized = ensureTaskDialogShape(candidate);
@@ -6474,6 +7456,8 @@ app.post('/import/excel', async (req, res) => {
           messages: [{ role: 'user', content: chunk }],
           maxTokens: 8192,
           temperature: 0.1,
+          provider: parsed.value.provider || undefined,
+          model: parsed.value.model || undefined,
         });
         const chunkTasks = normalizeImportedTasks(tryParseJsonBlock(llmText));
         allTasks = allTasks.concat(chunkTasks);
@@ -6504,6 +7488,7 @@ app.post('/import/excel', async (req, res) => {
             INSERT INTO tasks (
               project_id,
               title,
+              task_code,
               col,
               stage,
               assignee_user_id,
@@ -6517,9 +7502,9 @@ app.post('/import/excel', async (req, res) => {
               deps
             )
             VALUES (
-              $1, $2, 'backlog', $3, NULL, $4, NULL, $5, $6, $7, $8, $9, $10::jsonb
+              $1, $2, NULL, 'backlog', $3, NULL, $4, NULL, $5, $6, $7, $8, $9, $10::jsonb
             )
-            RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+            RETURNING id, public_id, project_id, title, task_code, col, stage, assignee_user_id, track, agent,
                       priority, hours, size, descript, notes, deps, created_at, updated_at
           `,
           [
@@ -6562,6 +7547,9 @@ app.post('/import/excel', async (req, res) => {
       created: createdTasks.length,
       tasks: createdTasks,
     });
+    generateProjectSnapshot(project.id).catch((err) =>
+      console.error('[snapshot] failed:', err.message)
+    );
   } catch (error) {
     if (isAppError(error)) {
       sendJson(res, error.statusCode, { error: error.errorCode });
@@ -6576,7 +7564,7 @@ app.post('/import/excel', async (req, res) => {
 });
 
 async function processImportJobAsync(payload) {
-  const { jobId, projectId, actorUserId, content, fileName } = payload;
+  const { jobId, projectId, actorUserId, content, fileName, provider, model } = payload;
   const CHUNK_SIZE = 10000;
   const lines = content.split('\n');
   const chunks = [];
@@ -6633,6 +7621,8 @@ async function processImportJobAsync(payload) {
           messages: [{ role: 'user', content: chunk }],
           maxTokens: 8192,
           temperature: 0.1,
+          provider: provider || undefined,
+          model: model || undefined,
         });
         const chunkTasks = normalizeImportedTasks(tryParseJsonBlock(llmText));
         allTasks = allTasks.concat(chunkTasks);
@@ -6668,6 +7658,7 @@ async function processImportJobAsync(payload) {
               INSERT INTO tasks (
                 project_id,
                 title,
+                task_code,
                 col,
                 stage,
                 assignee_user_id,
@@ -6681,9 +7672,9 @@ async function processImportJobAsync(payload) {
                 deps
               )
               VALUES (
-                $1, $2, 'backlog', $3, NULL, $4, NULL, $5, $6, $7, $8, $9, $10::jsonb
+                $1, $2, NULL, 'backlog', $3, NULL, $4, NULL, $5, $6, $7, $8, $9, $10::jsonb
               )
-              RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+              RETURNING id, public_id, project_id, title, task_code, col, stage, assignee_user_id, track, agent,
                         priority, hours, size, descript, notes, deps, created_at, updated_at
             `,
             [
@@ -6729,7 +7720,7 @@ async function processImportJobAsync(payload) {
 
     const fallbackTasks =
       totalTasksCreated === 0
-        ? fallbackImportTasksFromContent(content)
+        ? (LLM_STUB_MODE ? virtualImportTasksFromContent(content) : fallbackImportTasksFromContent(content))
         : [];
     if (fallbackTasks.length > 0) {
       const inserted = await runInTransaction(async (tx) => {
@@ -6740,6 +7731,7 @@ async function processImportJobAsync(payload) {
               INSERT INTO tasks (
                 project_id,
                 title,
+                task_code,
                 col,
                 stage,
                 assignee_user_id,
@@ -6753,9 +7745,9 @@ async function processImportJobAsync(payload) {
                 deps
               )
               VALUES (
-                $1, $2, 'backlog', $3, NULL, $4, NULL, $5, NULL, NULL, $6, $7, NULL
+                $1, $2, NULL, 'backlog', $3, NULL, $4, NULL, $5, NULL, NULL, $6, $7, NULL
               )
-              RETURNING id, public_id, project_id, title, col, stage, assignee_user_id, track, agent,
+              RETURNING id, public_id, project_id, title, task_code, col, stage, assignee_user_id, track, agent,
                         priority, hours, size, descript, notes, deps, created_at, updated_at
             `,
             [
@@ -6790,6 +7782,12 @@ async function processImportJobAsync(payload) {
       });
       totalTasksCreated += inserted.length;
       await recalculateProjectDuration(project.id);
+    }
+
+    if (totalTasksCreated > 0) {
+      generateProjectSnapshot(projectId).catch((err) =>
+        console.error('[snapshot] failed:', err.message)
+      );
     }
 
     await db.query(
@@ -6853,6 +7851,8 @@ app.post('/import/async', async (req, res) => {
         actorUserId: user.id,
         content: parsed.value.content,
         fileName: parsed.value.file_name,
+        provider: parsed.value.provider || undefined,
+        model: parsed.value.model || undefined,
       }).catch((err) => {
         console.error('[import] async job failed:', err.message);
       });
@@ -7537,6 +8537,112 @@ app.delete('/api/llm/provider-settings/:id', async (req, res) => {
   }
 });
 
+// ---- LLM API keys (per user, per provider) ----
+const LLM_API_KEYS_PROVIDERS = ['anthropic', 'openai', 'deepseek', 'groq', 'qwen', 'custom'];
+
+app.get('/api/llm/api-keys', async (req, res) => {
+  const user = requireAuth(req, res, LLM_ROLES);
+  if (!user) return;
+
+  try {
+    const result = await db.query(
+      `SELECT provider FROM llm_user_api_keys WHERE user_id = $1`,
+      [user.id]
+    );
+    const configured = new Set(result.rows.map((r) => r.provider));
+    const keys = LLM_API_KEYS_PROVIDERS.map((p) => ({ provider: p, has_key: configured.has(p) }));
+    sendJson(res, 200, { keys });
+  } catch (err) {
+    if (err.code === '42P01') {
+      sendJson(res, 501, { error: 'api_keys_unavailable' });
+      return;
+    }
+    console.error('GET /api/llm/api-keys failed:', err.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.post('/api/llm/api-keys', async (req, res) => {
+  const user = requireAuth(req, res, LLM_ROLES);
+  if (!user) return;
+
+  const body = req.body || {};
+  const provider =
+    typeof body.provider === 'string' ? body.provider.trim().toLowerCase() : '';
+  const apiKey = typeof body.api_key === 'string' ? body.api_key.trim() : null;
+  const baseUrl =
+    typeof body.base_url === 'string' ? body.base_url.trim() || null : null;
+
+  if (!LLM_API_KEYS_PROVIDERS.includes(provider)) {
+    sendJson(res, 400, { error: 'invalid_payload', message: 'Invalid provider' });
+    return;
+  }
+  if (!apiKey) {
+    sendJson(res, 400, { error: 'invalid_payload', message: 'api_key required' });
+    return;
+  }
+  if (provider === 'custom' && !baseUrl) {
+    sendJson(res, 400, { error: 'invalid_payload', message: 'base_url required for custom' });
+    return;
+  }
+
+  const enc = encryptLlmUserKey(apiKey);
+  if (!enc) {
+    sendJson(res, 500, { error: 'encryption_unavailable' });
+    return;
+  }
+
+  try {
+    await db.query(
+      `INSERT INTO llm_user_api_keys (user_id, provider, api_key_encrypted, base_url, updated_at)
+       VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (user_id, provider) DO UPDATE SET
+         api_key_encrypted = EXCLUDED.api_key_encrypted,
+         base_url = EXCLUDED.base_url,
+         updated_at = now()`,
+      [user.id, provider, enc, baseUrl]
+    );
+    sendJson(res, 201, { ok: true, provider });
+  } catch (err) {
+    if (err.code === '42P01') {
+      sendJson(res, 501, { error: 'api_keys_unavailable' });
+      return;
+    }
+    console.error('POST /api/llm/api-keys failed:', err.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
+app.delete('/api/llm/api-keys/:provider', async (req, res) => {
+  const user = requireAuth(req, res, LLM_ROLES);
+  if (!user) return;
+
+  const provider =
+    typeof req.params.provider === 'string'
+      ? req.params.provider.trim().toLowerCase()
+      : '';
+
+  if (!LLM_API_KEYS_PROVIDERS.includes(provider)) {
+    sendJson(res, 400, { error: 'invalid_payload', message: 'Invalid provider' });
+    return;
+  }
+
+  try {
+    const result = await db.query(
+      `DELETE FROM llm_user_api_keys WHERE user_id = $1 AND provider = $2 RETURNING id`,
+      [user.id, provider]
+    );
+    sendJson(res, 200, { ok: true, deleted: result.rowCount > 0 });
+  } catch (err) {
+    if (err.code === '42P01') {
+      sendJson(res, 501, { error: 'api_keys_unavailable' });
+      return;
+    }
+    console.error('DELETE /api/llm/api-keys/:provider failed:', err.message);
+    sendJson(res, 500, { error: 'internal_error' });
+  }
+});
+
 app.get('/api/llm/usage', async (req, res) => {
   const user = requireAuth(req, res, LLM_ROLES);
   if (!user) return;
@@ -7649,7 +8755,7 @@ app.delete('/api/llm/usage', async (req, res) => {
   }
 });
 
-app.get('/api/llm/models', (req, res) => {
+app.get('/api/llm/models', async (req, res) => {
   const user = requireAuth(req, res, LLM_ROLES);
   if (!user) {
     return;
@@ -7660,13 +8766,32 @@ app.get('/api/llm/models', (req, res) => {
       ? req.query.provider.trim().toLowerCase()
       : '';
   const provider = requestedProvider || LLM_DEFAULT_PROVIDER;
-  const models = getLlmAllowedModels(provider);
-  if (models.length === 0) {
+  if (!LLM_API_KEYS_PROVIDERS.includes(provider)) {
     sendJson(res, 400, { error: 'invalid_payload' });
     return;
   }
 
-  sendJson(res, 200, { provider, models });
+  const keyRow = await getLlmApiKeyForProvider(user.id, provider);
+  if (!keyRow || !keyRow.api_key) {
+    sendJson(res, 200, { provider, models: [] });
+    return;
+  }
+
+  try {
+    const result = await fetchModelsFromProvider(
+      provider,
+      keyRow.api_key,
+      keyRow.base_url || ''
+    );
+    if (result.error) {
+      sendJson(res, 200, { provider, models: [], error: result.error });
+      return;
+    }
+    sendJson(res, 200, { provider, models: result.models || [] });
+  } catch (err) {
+    console.error('GET /api/llm/models fetch failed:', err.message);
+    sendJson(res, 200, { provider, models: [], error: 'request_failed' });
+  }
 });
 
 app.post('/api/llm/models/list', async (req, res) => {
@@ -7677,79 +8802,20 @@ app.post('/api/llm/models/list', async (req, res) => {
   const provider =
     typeof body.provider === 'string' ? body.provider.trim().toLowerCase() : '';
   const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : (typeof body.api_key === 'string' ? body.api_key.trim() : '');
-  const baseUrl = typeof body.baseUrl === 'string' ? body.baseUrl.trim().replace(/\/+$/, '') : '';
+  const baseUrl = typeof body.baseUrl === 'string' ? body.baseUrl.trim() : '';
 
   if (!provider || !apiKey) {
     sendJson(res, 400, { error: 'invalid_payload', message: 'provider and apiKey required' });
     return;
   }
 
-  const getDefaultBase = () => {
-    switch (provider) {
-      case 'openai':
-        return 'https://api.openai.com';
-      case 'deepseek':
-        return 'https://api.deepseek.com';
-      case 'groq':
-        return 'https://api.groq.com/openai/v1';
-      case 'qwen':
-        return 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-      case 'google':
-      case 'custom':
-        return baseUrl || '';
-      default:
-        return baseUrl || '';
-    }
-  };
-
   try {
-    if (provider === 'anthropic') {
-      const response = await fetch('https://api.anthropic.com/v1/models', {
-        method: 'GET',
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': ANTHROPIC_API_VERSION,
-          'content-type': 'application/json',
-        },
-      });
-      const data = await readJsonSafely(response);
-      if (!response.ok) {
-        const errMsg = data && data.error && typeof data.error.message === 'string' ? data.error.message : (data && typeof data.error === 'string' ? data.error : 'request_failed');
-        sendJson(res, 200, { error: errMsg });
-        return;
-      }
-      const models = Array.isArray(data && data.data)
-        ? data.data.map((m) => (m && typeof m.id === 'string' ? m.id : null)).filter(Boolean)
-        : [];
-      sendJson(res, 200, { models });
+    const result = await fetchModelsFromProvider(provider, apiKey, baseUrl);
+    if (result.error) {
+      sendJson(res, 200, { error: result.error });
       return;
     }
-
-    const base = getDefaultBase();
-    if (!base) {
-      sendJson(res, 400, { error: 'invalid_payload', message: 'baseUrl required for custom' });
-      return;
-    }
-    const url = base + '/v1/models';
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Authorization: 'Bearer ' + apiKey,
-        'content-type': 'application/json',
-      },
-    });
-    const data = await readJsonSafely(response);
-    if (!response.ok) {
-      const errMsg = data && data.error && typeof data.error.message === 'string' ? data.error.message : (data && data.error && typeof data.error === 'object' && typeof data.error.message === 'string' ? data.error.message : (data && typeof data.error === 'string' ? data.error : 'request_failed'));
-      sendJson(res, 200, { error: errMsg });
-      return;
-    }
-    const raw = Array.isArray(data && data.data) ? data.data : [];
-    const models = raw
-      .map((m) => (m && typeof m.id === 'string' ? m.id : null))
-      .filter(Boolean)
-      .sort();
-    sendJson(res, 200, { models });
+    sendJson(res, 200, { models: result.models || [] });
   } catch (err) {
     console.error('POST /api/llm/models/list failed:', err.message);
     sendJson(res, 200, { error: 'request_failed' });
@@ -7784,13 +8850,23 @@ app.post('/api/llm/chat', async (req, res) => {
 
   let resolved = null;
   let userSetting = null;
-  const userSettingRow = await getLlmUserSettingForPurpose(user.id, parsed.value.purpose);
-  if (userSettingRow && userSettingRow.model) {
-    const prov = (userSettingRow.provider || '').toLowerCase();
-    const hasKey = userSettingRow.api_key || (prov === 'anthropic' && ANTHROPIC_API_KEY);
-    if (hasKey) {
-      userSetting = userSettingRow;
-      resolved = { value: { provider: prov, model: userSettingRow.model } };
+  const payloadHasExplicitProvider = parsed.value.provider && parsed.value.model;
+  if (payloadHasExplicitProvider) {
+    resolved = resolveLlmProviderAndModel(parsed.value);
+    if (resolved.error) {
+      sendJson(res, 400, { error: resolved.error });
+      return;
+    }
+  }
+  if (!resolved) {
+    const userSettingRow = await getLlmUserSettingForPurpose(user.id, parsed.value.purpose);
+    if (userSettingRow && userSettingRow.model) {
+      const prov = (userSettingRow.provider || '').toLowerCase();
+      const hasKey = Boolean(userSettingRow.api_key && userSettingRow.api_key.trim());
+      if (hasKey) {
+        userSetting = userSettingRow;
+        resolved = { value: { provider: prov, model: userSettingRow.model } };
+      }
     }
   }
   if (!resolved) {
@@ -7802,6 +8878,13 @@ app.post('/api/llm/chat', async (req, res) => {
   }
   if (userSetting && resolved.value.model !== userSetting.model) {
     resolved.value.model = userSetting.model;
+  }
+  // When no purpose-based setting, try api-keys table for resolved provider
+  if (!userSetting) {
+    const keyRow = await getLlmApiKeyForProvider(user.id, resolved.value.provider);
+    if (keyRow) {
+      userSetting = { api_key: keyRow.api_key, base_url: keyRow.base_url };
+    }
   }
 
   const provider = resolved.value.provider;
@@ -7879,54 +8962,14 @@ app.post('/api/llm/chat', async (req, res) => {
   let providerStatusCode = null;
   let workerUsed = Boolean(CLOUDFLARE_WORKER_URL);
 
-  if (!ANTHROPIC_API_KEY && !(userSetting && userSetting.api_key)) {
+  if (!(userSetting && userSetting.api_key)) {
     const responseMeta = {
       worker_used: workerUsed,
       latency_ms: Date.now() - startedAt,
       provider_http_status: null,
       response_id: null,
       stop_reason: null,
-      stub: LLM_STUB_MODE,
     };
-
-    if (LLM_STUB_MODE) {
-      let requestId;
-      try {
-        requestId = await writeLlmRequest({
-          projectId: parsed.value.project_id || null,
-          actorUserId: user.id,
-          purpose: parsed.value.purpose,
-          provider: resolved.value.provider,
-          model: resolved.value.model,
-          requestMeta,
-          responseMeta,
-          inputTokens: 0,
-          outputTokens: 0,
-          costEstimateUsd: null,
-          status: 'ok',
-          errorCode: null,
-        });
-      } catch (error) {
-        console.error('LLM request audit write failed:', error.message);
-        if (isDevelopment() && error.stack) {
-          console.error(error.stack);
-        }
-        sendJson(res, 500, { error: 'internal_error' });
-        return;
-      }
-
-      sendJson(res, 200, {
-        text: 'LLM_STUB_OK',
-        provider: resolved.value.provider,
-        model: resolved.value.model,
-        usage: {
-          input_tokens: 0,
-          output_tokens: 0,
-        },
-        request_id: requestId,
-      });
-      return;
-    }
 
     try {
       await writeLlmRequest({
@@ -7960,9 +9003,9 @@ app.post('/api/llm/chat', async (req, res) => {
   }
 
   try {
-    const requestOptions = userSetting
+    const requestOptions = userSetting && userSetting.api_key
       ? {
-          apiKey: userSetting.api_key || ANTHROPIC_API_KEY,
+          apiKey: userSetting.api_key,
           baseUrl: userSetting.base_url || undefined,
         }
       : undefined;
@@ -8134,7 +9177,11 @@ app.post('/api/llm/chat', async (req, res) => {
     if (isDevelopment() && error.stack) {
       console.error(error.stack);
     }
-    sendJson(res, 500, { error: 'internal_error' });
+    const payload = { error: 'internal_error' };
+    if (isDevelopment() && error && typeof error.message === 'string' && error.message.length < 300) {
+      payload.message = error.message;
+    }
+    sendJson(res, 500, payload);
   }
 });
 
@@ -8155,7 +9202,7 @@ app.post('/api/llm/settings/test', async (req, res) => {
   const baseUrl =
     typeof body.baseUrl === 'string' ? body.baseUrl.trim().replace(/\/+$/, '') : '';
 
-  const allowed = ['anthropic', 'openai', 'deepseek', 'groq', 'custom'];
+  const allowed = ['anthropic', 'openai', 'deepseek', 'groq', 'qwen', 'custom'];
   if (!provider || !allowed.includes(provider)) {
     sendJson(res, 400, { ok: false, error: 'Недопустимый провайдер' });
     return;
@@ -8188,6 +9235,8 @@ app.post('/api/llm/settings/test', async (req, res) => {
         return 'https://api.deepseek.com';
       case 'groq':
         return 'https://api.groq.com/openai';
+      case 'qwen':
+        return 'https://dashscope.aliyuncs.com/compatible-mode';
       default:
         return baseUrl || '';
     }
@@ -8198,11 +9247,17 @@ app.post('/api/llm/settings/test', async (req, res) => {
     return;
   }
 
+  const isAnthropicNative =
+    provider === 'anthropic' &&
+    (!baseUrl || base === 'https://api.anthropic.com');
+  const isOpenAiCompatible =
+    ['openai', 'deepseek', 'groq', 'qwen', 'custom'].includes(provider) || !isAnthropicNative;
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
 
   try {
-    if (provider === 'anthropic') {
+    if (isAnthropicNative) {
       const endpoint = `${base}/v1/messages`;
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -8212,11 +9267,11 @@ app.post('/api/llm/settings/test', async (req, res) => {
           'x-api-key': apiKey,
           'anthropic-version': ANTHROPIC_API_VERSION,
         },
-        body: JSON.stringify({
-          model,
-          max_completion_tokens: 5,
-          messages: [{ role: 'user', content: 'Say hi' }],
-        }),
+        body: JSON.stringify((() => {
+          const b = { model, messages: [{ role: 'user', content: 'Say hi' }] };
+          b[getMaxTokensParamName(provider)] = 5;
+          return b;
+        })()),
       });
       clearTimeout(timeout);
       const data = await readJsonSafely(response);
@@ -8234,35 +9289,35 @@ app.post('/api/llm/settings/test', async (req, res) => {
       return;
     }
 
-    const endpoint = `${base}/v1/chat/completions`;
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'content-type': 'application/json',
-        Authorization: 'Bearer ' + apiKey,
-      },
-      body: JSON.stringify({
-        model,
-        max_completion_tokens: 5,
-        messages: [{ role: 'user', content: 'Say hi' }],
-      }),
-    });
-    clearTimeout(timeout);
-    const data = await readJsonSafely(response);
-    if (!response.ok) {
-      const errMsg =
-        data && data.error && typeof data.error.message === 'string'
-          ? data.error.message
-          : data && data.error && typeof data.error === 'object' && typeof data.error.message === 'string'
+    if (isOpenAiCompatible) {
+      const endpoint = `${base}/v1/chat/completions`;
+      const body = { model, messages: [{ role: 'user', content: 'Say hi' }] };
+      body[getMaxTokensParamName(provider)] = 5;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'content-type': 'application/json',
+          Authorization: 'Bearer ' + apiKey,
+        },
+        body: JSON.stringify(body),
+      });
+      clearTimeout(timeout);
+      const data = await readJsonSafely(response);
+      if (!response.ok) {
+        const errMsg =
+          data && data.error && typeof data.error.message === 'string'
             ? data.error.message
-            : data && typeof data.error === 'string'
-              ? data.error
-              : `HTTP ${response.status}`;
-      sendJson(res, 200, { ok: false, error: errMsg });
-      return;
+            : data && data.error && typeof data.error === 'object' && typeof data.error.message === 'string'
+              ? data.error.message
+              : data && typeof data.error === 'string'
+                ? data.error
+                : `HTTP ${response.status}`;
+        sendJson(res, 200, { ok: false, error: errMsg });
+        return;
+      }
+      sendJson(res, 200, { ok: true, model });
     }
-    sendJson(res, 200, { ok: true, model });
   } catch (err) {
     clearTimeout(timeout);
     const msg = err.name === 'AbortError' ? 'Таймаут запроса' : (err.message || 'Ошибка запроса');
@@ -8698,4 +9753,25 @@ app.listen(PORT, async () => {
   });
   initLlmPricing().catch(() => {});
   setInterval(() => refreshLlmPricingCache().catch(() => {}), LLM_PRICES_REFRESH_INTERVAL_MS);
+
+  const HISTORY_RETENTION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+  setInterval(async () => {
+    try {
+      const rows = await db.query(
+        'SELECT id, history_retention_months FROM projects WHERE history_retention_months IS NOT NULL'
+      );
+      for (const row of rows.rows || []) {
+        const cutoff = new Date();
+        cutoff.setMonth(cutoff.getMonth() - Number(row.history_retention_months || 3));
+        await db.query(
+          'DELETE FROM task_events WHERE project_id = $1 AND created_at < $2',
+          [row.id, cutoff.toISOString()]
+        );
+      }
+    } catch (err) {
+      if (err.message && !/column.*does not exist/i.test(err.message)) {
+        console.error('[history-retention] cleanup failed:', err.message);
+      }
+    }
+  }, HISTORY_RETENTION_CLEANUP_INTERVAL_MS);
 });

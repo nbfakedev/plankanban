@@ -3,10 +3,10 @@
 Multi-user Kanban with Postgres storage, role-based auth (admin/techlead/employee), an LLM gateway that lets the API choose provider/model, and a Timeweb VPS deployment with HTTPS.
 
 ## Repository layout
-- `apps/web/` — lightweight front-end (`index.html`) that talks to `/api/`.
+- `apps/web/` — lightweight front-end: `index.html` (канбан), `login.html` (вход). Общение с `/api/`.
 - `apps/api/` — Node.js backend: Postgres persistence, RBAC, projects/tasks/audit, and an LLM gateway with provider/model selection plus logging and fail-state reporting.
 - `infra/` — Timeweb VPS helpers: nginx, TLS certificates, PM2, deployment scripts, and optional gateway proxies.
-- `docs/` — requirements, architecture, API, DB/migration guidance, deployment playbooks, and rollback plans.
+- `docs/` — requirements, architecture, API, DB/migration guidance (`MIGRATIONS.md`), deployment playbooks, scripts (`SCRIPTS.md`).
 
 ## Quick start (local/dev)
 1. Install Node.js LTS, Docker, and Postgres tooling.

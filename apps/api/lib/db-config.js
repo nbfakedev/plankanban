@@ -27,8 +27,18 @@ function toPort(value) {
 function createDbConfigFromEnv(env = process.env) {
   const databaseUrl = isSet(env.DATABASE_URL) ? env.DATABASE_URL.trim() : '';
   if (databaseUrl) {
+    let connectionString = databaseUrl;
+    if (isSet(env.PGHOST)) {
+      try {
+        const url = new URL(databaseUrl);
+        url.hostname = env.PGHOST.trim();
+        connectionString = url.toString();
+      } catch {
+        connectionString = databaseUrl;
+      }
+    }
     return {
-      config: { connectionString: databaseUrl },
+      config: { connectionString },
       source: 'DATABASE_URL',
       missingEnvVars: [],
     };

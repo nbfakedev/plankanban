@@ -6,6 +6,7 @@
     "dev": "node --env-file=.env --watch apps/api/server.js",
     "start": "node --env-file=.env apps/api/server.js",
     "db:migrate": "node --env-file=.env apps/api/scripts/migrate.js",
+    "db:migrate:local": "PGHOST=localhost node --env-file=.env apps/api/scripts/migrate.js",
     "db:rollback": "node --env-file=.env apps/api/scripts/rollback.js",
     "llm:prices:fetch": "node --env-file=.env apps/api/scripts/fetch-llm-prices.js",
     "db:seed": "node --env-file=.env apps/api/scripts/seed.js",

@@ -5,70 +5,58 @@
 
 ## 1. Обзор проекта
 
-**PlanKanban** — одностраничное веб-приложение (SPA) для управления задачами разработки. Работает полностью в браузере без бэкенда. Изначально создан для проекта mossb.ru, но поддерживает несколько проектов.
+**PlanKanban** (серверная редакция) — мультипользовательское веб-приложение для управления задачами разработки. Хранилище — Postgres на бэкенде, аутентификация JWT, RBAC (admin/techlead/employee).
 
 **Ключевые принципы:**
-- Zero-backend: весь стейт в `localStorage`
-- Single HTML file: CSS + JS + HTML в одном файле
-- AI-first: Claude встроен в три сценария создания и работы с задачами
+- Бэкенд: Node.js API + Postgres, статика из `apps/web/`
+- Аутентификация: страница входа (`/login.html`), JWT в `localStorage` (`pk24_token`)
+- AI-first: Claude/LLM встроен в три сценария (чат задачи, создание задачи, импорт) через `/api/llm/chat`
 - Dark/Light тема из коробки
 - Drag-and-drop между колонками
+- **task_code** — внутренний ID задачи в проекте (до 10 символов), уникален per project, используется для зависимостей
+
+**Legacy:** Standalone-версия без бэкенда (localStorage) — см. `.archive/mossb-kanban.html`.
 
 ---
 
 ## 2. Стек
 
-| Компонент | Технология | Версия |
-|---|---|---|
-| UI-фреймворк | Ванильный JS (без фреймворка) | — |
-| Стилизация | CSS-переменные + Custom Properties | — |
-| Шрифты | Google Fonts: Syne (заголовки), DM Mono (основной) | — |
-| Excel-парсинг | SheetJS (XLSX) | 0.18.5 (CDN) |
-| AI | Anthropic Claude API (claude-sonnet-4-20250514) | — |
-| Хранилище | localStorage | — |
-| Деплой | Статика (netlify.app) | — |
-
-**Внешние зависимости:**
-```html
-<!-- Только одна библиотека -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js">
-```
+| Компонент | Технология |
+|---|---|
+| Frontend | Ванильный JS, `apps/web/index.html` + `frontend/js/api-bridge.js` |
+| Стилизация | CSS-переменные + Custom Properties |
+| Шрифты | Google Fonts: Syne, DM Mono |
+| Excel-парсинг | SheetJS (XLSX) |
+| Backend | Node.js (Express), Postgres |
+| AI | LLM Gateway: Anthropic (через API или Cloudflare Worker) |
+| Хранилище | Postgres (данные), localStorage (JWT, тема, UI-состояние) |
+| Деплой | VPS (Timeweb), nginx, PM2, HTTPS |
 
 ---
 
 ## 3. Архитектура
 
 ```
-mossb-kanban.html
-├── <head>
-│   ├── Google Fonts (Syne + DM Mono)
-│   └── <style> — весь CSS (~500 строк)
-│
-├── <body>
-│   ├── <header> — хедер с метриками и контролами
-│   ├── .progress — прогресс-бар (2px)
-│   ├── .stage-bar — фильтр по этапам + поиск
-│   ├── .board-outer > .board — канбан-доска (5 колонок)
-│   ├── #task-ov — модальное окно просмотра задачи
-│   ├── #nt-ov — модальное окно создания задачи через Claude
-│   ├── #ps-ov — модальное окно настроек проекта
-│   └── #imp-ov — модальное окно импорта задач
-│
-└── <script>
-    ├── CONSTANTS — конфиги колонок, этапов, бюджетов, цветов
-    ├── DEFAULT_TASKS — 149 встроенных задач mossb.ru (JSON)
-    ├── STATE — tasks[], curStage, searchQ, activeId, chatHist
-    ├── THEME — dark/light переключение
-    ├── TIMER — таймер проекта и таймер задержки клиента
-    ├── SEARCH — фильтрация по тексту
-    ├── STAGE TABS — динамические табы этапов
-    ├── RENDER — рендер канбан-доски
-    ├── TASK VIEW — модалка просмотра + AI-чат по задаче
-    ├── NEW TASK CHAT — создание задачи через Claude
-    ├── DRAG & DROP — DnD между колонками
-    ├── IMPORT — импорт Excel/CSV или текста через Claude
-    └── PROJECTS — мульти-проектность
+apps/web/
+├── index.html        — канбан-доска (требует авторизации → редирект на /login.html)
+├── login.html        — страница входа (POST /auth/login)
+└── frontend/js/api-bridge.js — API-клиент, рендер, модалки
+
+apps/api/
+├── server.js         — Express API
+└── migrations/       — SQL миграции для Postgres
+
+Браузер → / → [auth guard] → index.html или /login.html
+        → /api/* → JWT → API → Postgres
+        → /api/llm/chat → LLM Gateway → Anthropic
 ```
+
+**Структура index.html (канбан):**
+- `<header>` — метрики, бюджет, таймеры, кнопки Import / + Задача / Проекты
+- `.progress` — прогресс-бар
+- `.stage-bar` — фильтр по этапам + поиск
+- `.board` — 5 колонок канбана
+- Модалки: просмотр задачи (#task-ov), создание задачи (#nt-ov), настройки проекта (#ps-ov), импорт (#imp-ov)
 
 ---
 
@@ -147,7 +135,10 @@ background: radial-gradient(ellipse 70% 50% at 15% -5%, rgba(240,165,0,.06) ...)
 
 ```typescript
 interface Task {
-  id: string;          // "E0-01", "R1-042" — этап-номер
+  id: string;          // Глобальный отображаемый ID (например "T-000997" или uuid)
+  raw_id: string;      // UUID задачи в API/БД
+  public_id: number;   // Числовой публичный номер (опционально)
+  task_code: string;   // ID задачи в рамках проекта (до 10 символов), например "E0-01", "R1-042"
   title: string;       // Название задачи
   stage: string;       // "A" | "R1" | "R1.1" | "R2" | "R2+" | "R3+" | "R4+" | "F"
   track: string;       // "Backend" | "Frontend" | "DevOps" | "Search" | "BOM" | "LLM" | ...
@@ -157,10 +148,30 @@ interface Task {
   col: string;         // "backlog" | "todo" | "inprogress" | "review" | "done"
   priority: string;    // "low" | "mid" | "high"
   desc: string;        // Описание / ТЗ для агента
-  deps: string;        // Зависимости: "E0-01, E0-02" (строка через запятую)
+  deps: { blocks: string[] };  // Зависимости: массив UUID или кодов задач (см. ниже)
   notes: string;       // Заметки (опционально)
 }
 ```
+
+#### 5.1.1 ID задачи (task_code)
+
+**ID задачи** — короткий внутренний идентификатор задачи **в рамках одного проекта** (до 10 символов). Примеры: `E0-01`, `R1-042`, `A-1`.
+
+- Задаётся при создании или редактировании задачи (поле «ID задачи» в форме).
+- В рамках проекта значение **уникально**: нельзя создать две задачи с одним и тем же `task_code`.
+- Используется для:
+  - отображения на карточках и в шапке задачи (вместо или вместе с глобальным номером);
+  - указания **зависимостей** — в поле «Зависимости» вводятся коды задач через запятую (например `E0-01, E0-02`).
+- Опционально: если не указан, задача отображается по глобальному ID (например `T-000997`).
+
+#### 5.1.2 Зависимости (deps)
+
+**Зависимости** задают, что текущая задача не должна переводиться в работу, пока не завершены перечисленные задачи.
+
+- Формат в API и в БД: объект `{ "blocks": ["uuid-или-код-1", "uuid-или-код-2", ...] }`.
+- В интерфейсе пользователь вводит коды задач через запятую или пробел, например: `E0-01, E0-02`. Бэкенд преобразует коды в UUID задач того же проекта.
+- **Правило перемещения:** задачу нельзя перевести в колонки **To Do** или **In Progress** (doing), пока все задачи из `deps.blocks` не находятся в колонке **Done**. При попытке перемещения API возвращает 409 с сообщением вида «Сначала завершите зависимости: E0-01, E0-02».
+- На карточке и в модалке задачи зависимости отображаются кодами (по `task_code` соответствующих задач).
 
 ### 5.2 Колонки (константа)
 
@@ -224,19 +235,18 @@ interface Project {
 
 ---
 
-## 6. localStorage — схема хранения
+## 6. Хранилище: API + localStorage
 
+**Серверное хранилище (Postgres):** проекты, задачи, пользователи, аудит, таймеры, LLM-запросы — см. `docs/DATABASE.md` и `docs/API.md`.
+
+**localStorage (клиент):**
 | Ключ | Тип | Описание |
 |---|---|---|
-| `tasks_mossb` | JSON Array | Задачи дефолтного проекта |
-| `tasks_{projId}` | JSON Array | Задачи каждого проекта |
-| `mossb_projects` | JSON Array | Список проектов |
-| `mossb_active_proj` | String | ID активного проекта |
-| `mossb_theme` | String | `"dark"` или `"light"` |
-| `mossb_timer_mode` | String | `"stopped"` \| `"project"` \| `"delay"` |
-| `mossb_timer_wall` | Number | Epoch ms — точка отсчёта при закрытии страницы |
-| `mossb_proj_ms` | Number | Накопленные ms таймера проекта |
-| `mossb_del_ms` | Number | Накопленные ms таймера задержки клиента |
+| `pk24_token` | String | JWT токен (Bearer) |
+| `mossb_theme` | String | `"dark"` \| `"light"` \| `"system"` |
+| `mossb_active_proj` | String | ID активного проекта (кэш, данные с сервера) |
+
+Таймеры и задачи загружаются и сохраняются через REST API. При отсутствии токена — редирект на `/login.html`.
 
 ---
 
@@ -605,9 +615,9 @@ const id = `${s.replace(/[^A-Za-z0-9]/g, '')}-${num}`;
 
 ## 18. Известные ограничения и что нужно доработать
 
-### 18.1 Критичные
-- **API ключ в клиенте** — Claude API key захардкожен/передаётся напрямую из браузера. Нужен прокси-эндпоинт.
-- **localStorage лимит** — при большом количестве задач (~1000+) возможно переполнение (~5MB). Нужна миграция на IndexedDB или бэкенд.
+### 18.1 Критичные (решено в серверной редакции)
+- ~~API ключ в клиенте~~ — LLM вызывается через бэкенд (`/api/llm/chat`), ключ в `.env`.
+- ~~localStorage лимит~~ — задачи в Postgres, localStorage только для JWT и темы.
 
 ### 18.2 Функциональные доработки под mossb.ru
 - **Поле "Зависимости"** — сейчас строка, нужна визуализация граф-зависимостей
@@ -628,15 +638,15 @@ const id = `${s.replace(/[^A-Za-z0-9]/g, '')}-${num}`;
 
 ## 19. Деплой
 
-Текущий деплой: **Netlify** (статика)
-URL: `https://plankanban25.netlify.app/`
+Текущий деплой: **VPS (Timeweb)** — nginx, Node.js, Postgres, PM2, HTTPS.
 
-Для деплоя достаточно одного HTML файла — никакого сборщика, npm, node_modules.
+См. `docs/DEPLOYMENT.md` и `docs/KANBAN_DEPLOY_TZ.md`.
 
 ```bash
-# Локальный запуск
-python3 -m http.server 8080
-# или просто открыть HTML в браузере
+# Локальный запуск (см. docs/DEVELOPMENT.md)
+docker compose up -d db
+npm run db:migrate && npm run db:seed
+npm run dev   # API + статика на :3000
 ```
 
 ---

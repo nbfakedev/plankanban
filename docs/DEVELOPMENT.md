@@ -20,10 +20,16 @@
 - ручные тесты по чек-листу в `AGENTS.md`
 - обновить `docs/API.md` и `docs/DATABASE.md` если менялись контракты/схема
 
+## Скрипты
+См. `docs/SCRIPTS.md` — список npm-скриптов и CLI-утилит (`set-admin-password`, `llm:prices:fetch`).
+
 ## Local run (updated)
 1) `npm install` in repo root
-2) `npm run dev` (API + static web on :3000)
-3) `npm start` (normal start without watch)
+2) `docker compose up -d db` (если ещё не запущен Postgres)
+3) `npm run db:migrate` и `npm run db:seed`
+4) `npm run dev` (API + static web on :3000)
+5) Открыть http://localhost:3000 — редирект на `/login.html`, вход: `admin@local.dev` / `admin123`
+6) `npm start` (normal start without watch)
 
 ## Docker development
 - `docker compose up --force-recreate api`

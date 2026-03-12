@@ -1,12 +1,12 @@
 # Project Tasks (backlog)
 
-## P0 — launch plan
-- [ ] Repo bootstrap: structure, linting, CI, minimum docs (architecture/API/DB/deployment).
-- [ ] Timeweb VPS deployment with nginx, HTTPS, PM2, rollback script, and deployment checklist.
-- [ ] Postgres provisioning: schema, migrations, connection via API, and migration documentation.
-- [ ] Multi-user auth: login/logout/me with RBAC (admin/techlead/employee) and role-aware session handling.
-- [ ] Projects/Tasks/Audit CRUD: enforce RBAC, audit trail, and server-side storage.
-- [ ] LLM gateway that selects provider/model per request, records usage, enforces rate limits, and surfaces provider errors.
+## P0 — launch plan ✅ (done)
+- [x] Repo bootstrap: structure, linting, CI, minimum docs (architecture/API/DB/deployment).
+- [x] Timeweb VPS deployment with nginx, HTTPS, PM2, rollback script, and deployment checklist.
+- [x] Postgres provisioning: schema, migrations (001–021), connection via API, docs `MIGRATIONS.md`.
+- [x] Multi-user auth: login/logout/me/change-password, JWT, RBAC (admin/techlead/employee), `login.html`.
+- [x] Projects/Tasks/Audit CRUD: enforce RBAC, audit trail, task_trash, task_chats, server-side storage.
+- [x] LLM gateway: provider/model selection, rate limits, stub mode, llm_requests logging.
 
 ## P1 — usability
 - [ ] LLM tuning: allow switching provider/model from the UI with clear guidance on limits.

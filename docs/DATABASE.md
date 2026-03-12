@@ -18,6 +18,13 @@
 - budget_total (bigint, default 0)
 - stages (text[], default `['A','R1','R1.1','R2','R3+','F']`)
 - stage_settings (jsonb, default `[]`; elements: `{name, budget, color}`)
+- agent_settings (jsonb; elements: `{name, type: "ai"|"human", color}`)
+- priority_options (jsonb; элементы `{value: int, label}` для приоритетов в формах задач)
+- size_options (jsonb; элементы `{id, label}` — XS, S, M, L, XL или кастомные)
+- column_settings (jsonb; элементы `{id, label, visible, locked}` — backlog и done locked)
+- snapshot_md (text, nullable; Markdown снапшот проекта)
+- snapshot_updated_at (timestamptz, nullable)
+- history_retention_months (int, nullable; 3, 6 или null — автоудаление событий старше срока)
 - created_at, updated_at
 
 ## project_members
@@ -31,6 +38,7 @@
 - public_id (bigint, unique, global readable ID across all projects)
 - project_id
 - title
+- task_code (varchar(10), nullable; internal ID within project, unique per project)
 - col (backlog|todo|doing|review|done)
 - position (int, default 0; manual order inside column)
 - stage (например R0..R4+)
@@ -44,6 +52,14 @@
 - notes (text)
 - deps (text/json)
 - created_at, updated_at
+
+## task_dependencies (зависимости задач)
+- id (uuid, PK)
+- task_id (uuid, FK -> tasks.id, ON DELETE CASCADE)
+- depends_on_task_id (uuid, FK -> tasks.id, ON DELETE CASCADE)
+- created_at (timestamptz)
+- UNIQUE(task_id, depends_on_task_id)
+- CHECK (task_id != depends_on_task_id)
 
 ## task_events (аудит)
 - id (uuid)
@@ -79,6 +95,7 @@
 - project_id (uuid, nullable)
 - deleted_project_name (text; snapshot name if project removed)
 - title
+- task_code (varchar(10), nullable)
 - col (backlog|todo|doing|review|done)
 - stage
 - assignee_user_id (nullable)
@@ -121,7 +138,7 @@
 - error_code (text, nullable)
 - created_at
 
-Миграции: хранить в `apps/api/migrations/` (SQL).
+Миграции: хранить в `apps/api/migrations/` (SQL). См. `docs/MIGRATIONS.md` для полного списка.
 
 ## service_accounts
 - id (uuid)

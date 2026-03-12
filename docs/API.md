@@ -74,6 +74,14 @@ POST `/auth/logout`
 - 401: `{ "error": "unauthorized" }`
 - 403: `{ "error": "account_inactive" }`
 
+POST `/auth/change-password`
+- requires valid Bearer token
+- body: `{ "current_password": "string", "new_password": "string" }`
+- 200: `{ "ok": true }`
+- 400: `{ "error": "invalid_payload" }`
+- 401: `{ "error": "unauthorized" }`
+- 403: `{ "error": "wrong_password" }` — текущий пароль неверный
+
 GET `/auth/me`
 - requires valid Bearer token
 - 200:
@@ -208,6 +216,48 @@ GET `/projects/:id`
 - 404: `{ "error": "project_not_found" }`
 - 500: `{ "error": "projects_unavailable" }`
 
+GET `/projects/:id/snapshot`
+- roles: `admin`, `techlead`, `employee`
+- Возвращает снапшот проекта в Markdown. Если снапшота нет — генерирует и сохраняет.
+- 200:
+```json
+{
+  "snapshot_md": "string",
+  "snapshot_updated_at": "timestamp"
+}
+```
+- 404: `{ "error": "project_not_found" }`
+- 500: `{ "error": "snapshot_unavailable" }`
+
+POST `/projects/:id/snapshot/refresh`
+- roles: `admin`, `techlead`, `employee`
+- Принудительная регенерация снапшота.
+- 200: `{ "snapshot_md": "string", "snapshot_updated_at": "timestamp" }`
+- 404: `{ "error": "project_not_found" }`
+- 500: `{ "error": "snapshot_unavailable" }`
+
+GET `/tasks/:id/dependencies`
+- roles: `admin`, `techlead`, `employee`
+- Возвращает массив задач, от которых зависит данная задача.
+- 200: `[{ "id": "uuid", "public_id": 1, "title": "string", "col": "string", "stage": "string" }, ...]`
+- 404: `{ "error": "task_not_found|project_not_found" }`
+
+POST `/tasks/:id/dependencies`
+- roles: `admin`, `techlead`
+- body: `{ "depends_on_task_id": "uuid" }`
+- Добавляет зависимость. Проверка на циклы (BFS).
+- 201: `{ "id": "uuid", "task_id": "uuid", "depends_on_task_id": "uuid", "created_at": "timestamp" }`
+- 400: `{ "error": "invalid_payload" }` — некорректный или самозависимость
+- 404: `{ "error": "task_not_found|depends_on_task_not_found|project_not_found" }`
+- 409: `{ "error": "cyclic_dependency|already_exists" }`
+
+DELETE `/tasks/:id/dependencies/:depId`
+- roles: `admin`, `techlead`
+- Удаляет зависимость. `depId` — UUID задачи, от которой зависели (`depends_on_task_id`).
+- 204: No Content
+- 404: `{ "error": "task_not_found|dependency_not_found|project_not_found" }`
+- 500: `{ "error": "dependencies_unavailable" }`
+
 PATCH `/projects/:id`
 - roles: `admin`, `techlead`
 - body: same as `POST /projects`
@@ -295,6 +345,12 @@ POST `/projects/activate`
 ## Tasks API
 All endpoints require `Authorization: Bearer <token>`.
 
+### ID задачи (task_code) и зависимости (deps)
+
+**ID задачи (task_code)** — опциональное поле задачи, короткий (до 10 символов) внутренний идентификатор **в рамках проекта**. Уникален в пределах одного проекта. Примеры: `E0-01`, `R1-042`. Используется для отображения на карточках и для указания зависимостей по коду.
+
+**Зависимости (deps)** — объект вида `{ "blocks": ["uuid1", "uuid2", ...] }`. В запросах создания/обновления задачи в `blocks` можно передавать как UUID задач, так и их **коды (task_code)**; сервер разрешает коды в UUID в рамках того же проекта. Задача не может быть переведена в колонки `todo` или `doing`, пока все задачи из `deps.blocks` не находятся в колонке `done`; при попытке такого перемещения возвращается 409 `task_blocked_by_deps` с полем `message` для отображения пользователю.
+
 Audit behavior for task mutations:
 - `POST /projects/:projectId/tasks`, `PATCH /tasks/:id`, `POST /tasks/:id/move`, `PATCH /tasks/reorder`, `DELETE /tasks/:id` write audit rows to `task_events`.
 - event types for core task flow: `task_created`, `task_updated`, `task_moved`, `task_reordered`, `task_deleted`.
@@ -314,6 +370,7 @@ GET `/projects/:projectId/tasks`
       "public_id": 123,
       "project_id": "uuid",
       "title": "string",
+      "task_code": "E0-01",
       "col": "backlog|todo|doing|review|done",
       "position": 0,
       "stage": "string|null",
@@ -341,6 +398,10 @@ GET `/projects/:projectId/events`
 - query:
   - `limit` (optional, default `100`, max `500`)
   - `offset` (optional, default `0`)
+  - `from` (optional, ISO date) — события с даты
+  - `to` (optional, ISO date) — события по дату
+  - `event_type` (optional) — один тип или `event_types` — несколько через запятую (task_created, task_updated, task_moved, task_reordered, task_deleted, agent_action)
+  - `q` (optional) — поиск по event_type, task_id, payload
 - 200:
 ```json
 {
@@ -349,8 +410,11 @@ GET `/projects/:projectId/events`
       "event_type": "task_moved",
       "payload": { "from_col": "todo", "to_col": "doing" },
       "actor_user_id": "uuid",
+      "actor_email": "user@example.com",
       "task_id": "uuid",
-      "created_at": "timestamp"
+      "created_at": "timestamp",
+      "before": {},
+      "after": {}
     }
   ],
   "limit": 100,
@@ -360,6 +424,15 @@ GET `/projects/:projectId/events`
 - 400: `{ "error": "invalid_project_id|invalid_payload" }`
 - 404: `{ "error": "project_not_found" }`
 - 500: `{ "error": "events_unavailable" }`
+
+POST `/projects/:projectId/history-retention`
+- roles: `admin`, `techlead`
+- body: `{ "retention_months": 3 | 6 | null }` — срок хранения истории (3, 6 месяцев или null = без ограничения)
+- Обновляет настройку и **удаляет** события старше указанного срока. Раз в час для всех проектов выполняется автоочистка.
+- 200: `{ "project": {...}, "deleted_events": N }`
+- 400: `{ "error": "invalid_project_id|invalid_payload" }`
+- 404: `{ "error": "project_not_found" }`
+- 500: `{ "error": "schema_outdated|history_retention_unavailable" }`
 
 GET `/projects/:projectId/metrics`
 - roles: `admin`, `techlead`, `employee`
@@ -390,21 +463,25 @@ POST `/projects/:projectId/tasks`
   "col": "todo"
 }
 ```
+- `task_code`: optional `string`, max 10 chars; internal task ID within project (unique per project). Used for dependencies by code (e.g. `deps.blocks: ["E0-01","E0-02"]`).
 - `status` can be used as alias for `col`
 - `descript` is the canonical DB-backed description field.
 - Backward compatibility: request payload can use `descript` or `description`.
 - `descript`: optional `string`, max length `5000`.
+- `deps.blocks`: array of task UUIDs or task codes; server resolves codes to UUIDs in the same project.
 - 201: `{ "task": { ...task } }`
-- 400: `{ "error": "invalid_project_id|invalid_payload" }`
+- 400: `{ "error": "invalid_project_id|invalid_payload|task_code_duplicate", "message": "ID задачи уже используется в этом проекте" }`
 - 404: `{ "error": "project_not_found" }`
 - 500: `{ "error": "tasks_unavailable" }`
 
 PATCH `/tasks/:id`
 - roles: `admin`, `techlead`
-- body: any mutable task fields (`title`, `col`/`status`, `stage`, `assignee_user_id`, `track`, `agent`, `priority`, `hours`, `size`, `descript`, `description`, `notes`, `deps`)
+- body: any mutable task fields (`title`, `task_code`, `col`/`status`, `stage`, `assignee_user_id`, `track`, `agent`, `priority`, `hours`, `size`, `descript`, `description`, `notes`, `deps`)
+- `task_code`: optional `string`, max 10 chars; unique per project.
 - `descript`: optional `string`, max length `5000`.
+- `deps.blocks`: array of task UUIDs or task codes; server resolves codes to UUIDs.
 - 200: `{ "task": { ...task } }`
-- 400: `{ "error": "invalid_task_id|invalid_payload" }`
+- 400: `{ "error": "invalid_task_id|invalid_payload|task_code_duplicate", "message": "ID задачи уже используется в этом проекте" }`
 - 404: `{ "error": "task_not_found" }`
 - 500: `{ "error": "tasks_unavailable" }`
 
@@ -601,9 +678,11 @@ DELETE `/tasks/:id/permanent`
 POST `/tasks/:id/move`
 - roles: `admin`, `techlead`
 - body: `{ "col": "doing" }` or `{ "status": "doing" }`
+- Moving to `doing` or `todo` is blocked if the task has `deps.blocks` and any of those tasks are not in `done`. Then the API returns 409.
 - 200: `{ "task": { ...task } }`
 - 400: `{ "error": "invalid_task_id|invalid_payload" }`
 - 404: `{ "error": "task_not_found" }`
+- 409: `{ "error": "task_blocked_by_deps", "message": "Сначала завершите зависимости: E0-01, E0-02" }`
 - 500: `{ "error": "tasks_unavailable" }`
 
 PowerShell (`curl.exe`) examples:
@@ -739,6 +818,23 @@ POST `/import/excel`
 - 400: `{ "error": "invalid_payload|empty_import" }`
 - 404: `{ "error": "project_not_found" }`
 - 500: `{ "error": "import_unavailable" }`
+
+POST `/import/async`
+- roles: `admin`, `techlead`
+- body: same as `POST /import/excel` (project_id, file_name, content)
+- запускает асинхронный импорт, возвращает job_id сразу
+- 202: `{ "job_id": "uuid" }`
+- 400/404/500: как у `/import/excel`
+
+GET `/import/status/:jobId`
+- roles: `admin`, `techlead`
+- 200: `{ "status": "pending|running|done|error", "created": N, "error": "string|null" }`
+- 404: `{ "error": "job_not_found" }`
+
+GET `/import/jobs`
+- roles: `admin`, `techlead`
+- список последних заданий импорта
+- 200: `{ "jobs": [ { "id": "uuid", "status": "...", "created_at": "timestamp", ... } ] }`
 
 POST `/llm/task-dialog`
 - roles: `admin`, `techlead` (`employee` gets `403`)
@@ -1140,3 +1236,39 @@ Invoke-RestMethod -Method Get `
   -Uri "http://localhost:3000/api/events?since=2026-03-05T00:00:00Z&limit=50" `
   -Headers @{ "x-service-token" = $serviceToken }
 ```
+
+## Admin API
+All admin endpoints require `Authorization: Bearer <admin-jwt>` and role `admin`.
+
+### Пользователи
+GET `/api/admin/users`
+- 200: `{ "users": [ { "id": "uuid", "email": "string", "role": "string", "status": "string" }, ... ] }`
+
+POST `/api/admin/users`
+- body: `{ "email": "string", "password": "string", "role": "admin|techlead|employee" }`
+- 201: `{ "user": { ... } }`
+
+PATCH `/api/admin/users/:id`
+- body: `{ "email": "string", "role": "string", "status": "string" }`
+- 200: `{ "user": { ... } }`
+
+POST `/api/admin/users/:id/transfer`
+- перенос задач пользователя другому пользователю
+- body: `{ "target_user_id": "uuid" }`
+
+DELETE `/api/admin/users/:id`
+- 200: `{ "deleted_user_id": "uuid" }`
+
+### Очистка данных
+DELETE `/api/admin/data/events` — очистка task_events
+DELETE `/api/admin/data/trash` — очистка task_trash
+DELETE `/api/admin/data/llm-stats` — очистка llm_requests
+DELETE `/api/admin/data/projects` — удаление всех проектов и связанных данных
+DELETE `/api/admin/data/all-stats` — агрегированная очистка событий, корзины, LLM-статистики
+
+- 200: `{ "ok": true, ... }`
+- 401/403: как обычно
+
+### Аккаунт
+DELETE `/api/admin/account`
+- удаление текущего аккаунта админа (требует подтверждения)

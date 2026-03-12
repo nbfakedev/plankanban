@@ -77,13 +77,12 @@
         ],
       },
     ];
-    if (role === 'admin') {
+    if (role === 'admin' || role === 'techlead') {
       sections.push({
         id: 'llm',
         label: 'LLM провайдеры',
         subs: [
-          { id: 'llm_basic', label: 'Базовые настройки' },
-          { id: 'llm_individual', label: 'Индивидуальные настройки' },
+          { id: 'llm_keys', label: 'API-ключи' },
           { id: 'llm_usage', label: 'Статистика' },
         ],
       });
@@ -117,6 +116,17 @@
       id: 'security',
       label: 'Безопасность',
       subs: securitySubs,
+    });
+    sections.push({
+      id: 'documentation',
+      label: 'Документация',
+      subs: [
+        { id: 'doc_profile', label: 'Профиль' },
+        { id: 'doc_llm', label: 'LLM' },
+        { id: 'doc_projects', label: 'Проекты и задачи' },
+        { id: 'doc_analytics', label: 'Аналитика' },
+        { id: 'doc_settings', label: 'Настройки' },
+      ],
     });
     return sections;
   }
@@ -158,6 +168,9 @@
   let pendingStageActionsByProject = {};
   let activeProfileSection = 'profile';
   let activeProfileSubSection = 'account';
+  const NO_STAGE = 'Без этапа';
+  const NO_STAGE_COLOR = '#64748b';
+
   let profileTrashLoading = false;
   let profileTrashItems = [];
   let profileTrashFilters = {
@@ -249,10 +262,10 @@
   }
 
   function formatColLabel(col) {
+    const cols = typeof getProjectColumns === 'function' ? getProjectColumns() : [];
     const normalized = String(col || '').toLowerCase();
-    const match = COLS.find(function (item) {
-      return item.id === normalized;
-    });
+    const uiNorm = normalized === 'doing' ? 'inprogress' : normalized;
+    const match = cols.find(function (item) { return item.id === uiNorm || item.id === normalized; });
     return match ? match.label : 'Backlog';
   }
 
@@ -268,17 +281,21 @@
       return item.id === projectId;
     });
     if (!project) {
-      return [];
+      return [NO_STAGE];
     }
+    var stages = [];
     if (Array.isArray(project.stageSettings) && project.stageSettings.length > 0) {
-      return project.stageSettings.map(function (item) {
+      stages = project.stageSettings.map(function (item) {
         return item.name;
       });
+    } else if (Array.isArray(project.stages) && project.stages.length > 0) {
+      stages = project.stages.slice();
     }
-    if (Array.isArray(project.stages) && project.stages.length > 0) {
-      return project.stages.slice();
+    if (stages.length === 0 || stages[0] !== NO_STAGE) {
+      var rest = stages.filter(function (s) { return String(s || '').trim().toLowerCase() !== NO_STAGE.toLowerCase(); });
+      stages = [NO_STAGE].concat(rest);
     }
-    return [];
+    return stages;
   }
 
   function mapDeletedTaskFromApi(item) {
@@ -354,12 +371,6 @@
       + '</div>'
       + '</div>';
     document.body.appendChild(overlay);
-
-    overlay.addEventListener('click', function (event) {
-      if (event.target === overlay) {
-        closeProfilePanel();
-      }
-    });
 
     const closeButton = document.getElementById('profile-close-btn');
     if (closeButton) {
@@ -519,21 +530,21 @@
     if (!content) { return; }
 
     const jwt = decodeJwtPayload(localStorage.getItem('pk24_token'));
-    const userEmail  = (jwt && jwt.email)  || '—';
-    const userRole   = (jwt && jwt.role)   || '—';
-    const userId     = (jwt && jwt.sub)    || '—';
-    const tokenExp   = jwt && jwt.exp ? new Date(jwt.exp * 1000) : null;
+    const userEmail = (jwt && jwt.email) || '—';
+    const userRole = (jwt && jwt.role) || '—';
+    const userId = (jwt && jwt.sub) || '—';
+    const tokenExp = jwt && jwt.exp ? new Date(jwt.exp * 1000) : null;
     const tokenExpStr = tokenExp
-      ? new Intl.DateTimeFormat('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }).format(tokenExp)
+      ? new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(tokenExp)
       : '—';
     const nowMs = Date.now();
     const expMs = tokenExp ? tokenExp.getTime() : 0;
     const hoursLeft = expMs > nowMs ? Math.floor((expMs - nowMs) / 3600000) : 0;
 
     const roleLabels = { admin: 'Администратор', techlead: 'Техлид', employee: 'Сотрудник' };
-    const roleLabel  = roleLabels[userRole] || userRole;
+    const roleLabel = roleLabels[userRole] || userRole;
     const roleColors = { admin: 'var(--red)', techlead: 'var(--gold)', employee: 'var(--green)' };
-    const roleColor  = roleColors[userRole] || 'var(--tx3)';
+    const roleColor = roleColors[userRole] || 'var(--tx3)';
 
     const projectName = getProjectName(activeProjId) || 'Не выбран';
 
@@ -583,12 +594,12 @@
           apiFetch('/stats/tasks'),
           apiFetch('/stats/budget'),
         ]);
-        const inWork   = (tasks.in_work  || 0);
-        const done     = (tasks.done     || 0);
-        const backlog  = (tasks.backlog  || 0);
-        const total    = backlog + inWork + done;
-        const earned   = Number(budget.earned  || 0);
-        const budTotal = Number(budget.total   || 0);
+        const inWork = (tasks.in_work || 0);
+        const done = (tasks.done || 0);
+        const backlog = (tasks.backlog || 0);
+        const total = backlog + inWork + done;
+        const earned = Number(budget.earned || 0);
+        const budTotal = Number(budget.total || 0);
         const progress = Number(budget.progress || 0);
         const fmt = function (n) { return n.toLocaleString('ru-RU'); };
         statsEl.innerHTML = ''
@@ -632,55 +643,59 @@
     if (!content) { return; }
 
     const jwt = decodeJwtPayload(localStorage.getItem('pk24_token'));
-    const userRole  = (jwt && jwt.role)  || 'employee';
-    const userId    = (jwt && jwt.sub)   || '';
+    const userRole = (jwt && jwt.role) || 'employee';
+    const userId = (jwt && jwt.sub) || '';
     const roleLabels = { admin: 'Администратор', techlead: 'Техлид', manager: 'Менеджер', employee: 'Сотрудник' };
-    const roleLabel  = roleLabels[userRole] || userRole;
+    const roleLabel = roleLabels[userRole] || userRole;
     const roleColors = { admin: 'var(--red)', techlead: 'var(--gold)', manager: 'var(--c-A)', employee: 'var(--green)' };
-    const roleColor  = roleColors[userRole] || 'var(--tx3)';
+    const roleColor = roleColors[userRole] || 'var(--tx3)';
     var isAdmin = userRole === 'admin';
 
-    const rows = projects.map(function (project) {
+    var cardsHtml = projects.map(function (project) {
       const isActive = project.id === activeProjId;
       const stageCount = Array.isArray(project.stages) ? project.stages.length : 0;
-      const budget = Number(project.budget_total || 0);
+      const weeks = Number(project.duration_weeks || project.weeks || 0);
+      const budget = Number(project.budget_total || project.budget || 0);
       const budgetStr = budget > 0 ? budget.toLocaleString('ru-RU') + ' ₽' : '—';
       var assignHtml = '';
       if (isAdmin) {
-        assignHtml = '<select class="profile-input" style="height:24px;font-size:10px;padding:0 6px;min-width:140px;max-width:180px" data-assign-project="' + escapeHtml(project.id) + '">'
-          + '<option value="">Назначить...</option>'
+        assignHtml = '<div class="profile-proj-field"><label class="profile-proj-lbl">Ответственный</label>'
+          + '<select class="status-sel profile-proj-sel" data-assign-project="' + escapeHtml(project.id) + '">'
+          + '<option value="">—</option>'
           + cachedUsersList.map(function (u) {
             return '<option value="' + escapeHtml(u.id) + '"' + (project.responsible_user_id === u.id ? ' selected' : '') + '>' + escapeHtml(u.email) + '</option>';
           }).join('')
-          + '</select>';
+          + '</select></div>';
+      } else {
+        var ownerEmail = '';
+        if (project.responsible_user_id) {
+          var owner = cachedUsersList.find(function (u) { return u.id === project.responsible_user_id; });
+          ownerEmail = owner ? owner.email : '';
+        }
+        assignHtml = '<div class="profile-proj-field"><label class="profile-proj-lbl">Ответственный</label><span class="profile-proj-val">' + escapeHtml(ownerEmail || '—') + '</span></div>';
       }
-      var ownerEmail = '';
-      if (project.responsible_user_id) {
-        var owner = cachedUsersList.find(function (u) { return u.id === project.responsible_user_id; });
-        ownerEmail = owner ? owner.email : '';
-      }
-      return ''
-        + '<div class="profile-role-row"' + (isActive ? ' style="border-color:var(--gold);background:var(--gold-dim)"' : '') + '>'
-        + '<div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">'
-        + (isActive ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--gold);flex-shrink:0;box-shadow:0 0 6px var(--gold-glow)"></span>' : '<span style="width:6px;height:6px;border-radius:50%;background:var(--bd3);flex-shrink:0"></span>')
-        + '<div class="profile-role-name">' + escapeHtml(project.name) + (isActive ? ' <span style="font-size:9px;color:var(--gold);letter-spacing:1px">АКТИВНЫЙ</span>' : '') + '</div>'
+      var weeksStr = weeks > 0 ? weeks + ' нед.' : '—';
+      return '<div class="profile-proj-card"' + (isActive ? ' data-active="1"' : '') + '>'
+        + '<div class="profile-proj-head">'
+        + '<div class="profile-proj-name">' + escapeHtml(project.name) + '</div>'
+        + '<div class="profile-proj-status">' + (isActive ? 'Активный' : 'Не активный') + '</div>'
         + '</div>'
-        + '<div style="display:flex;gap:10px;align-items:center;font-size:11px;color:var(--tx3);flex-shrink:0;flex-wrap:wrap">'
-        + (ownerEmail && !isAdmin ? '<span title="Ответственный" style="color:var(--c-A)">' + escapeHtml(ownerEmail) + '</span>' : '')
+        + '<div class="profile-proj-body">'
         + assignHtml
-        + '<span>' + stageCount + ' этапов</span>'
-        + '<span>' + budgetStr + '</span>'
-        + '<span style="color:' + roleColor + ';font-weight:600">' + escapeHtml(roleLabel) + '</span>'
+        + '<div class="profile-proj-meta">'
+        + '<span>' + stageCount + ' этапов</span><span>' + budgetStr + '</span><span>' + weeksStr + '</span>'
         + '</div>'
+        + '</div>'
+        + '<button type="button" class="profile-proj-settings-btn" onclick="if(typeof openProjSettings===\'function\')openProjSettings(\'' + escapeHtml(project.id) + '\')" title="Настройки проекта" aria-label="Настройки">⚙</button>'
         + '</div>';
     }).join('');
 
     content.innerHTML = ''
       + '<div class="profile-pane">'
-      + '<div class="profile-pane-title">Мои проекты и роли</div>'
-      + '<div class="profile-pane-sub">Роль в системе: <strong style="color:' + roleColor + '">' + escapeHtml(roleLabel) + '</strong> · ID: <span style="color:var(--tx3);font-size:11px">' + escapeHtml(userId) + '</span></div>'
-      + '<div class="profile-role-list">'
-      + (rows || '<div class="profile-empty">Нет доступных проектов</div>')
+      + '<div class="profile-pane-title">Проекты</div>'
+      + '<div class="profile-pane-sub">Роль: <strong style="color:' + roleColor + '">' + escapeHtml(roleLabel) + '</strong></div>'
+      + '<div class="profile-proj-grid">'
+      + (cardsHtml || '<div class="profile-empty" style="grid-column:1/-1">Нет доступных проектов</div>')
       + '</div>'
       + '</div>';
 
@@ -694,13 +709,18 @@
             .catch(function (err) { showError(err.message || 'Ошибка'); });
         };
       });
+      if (typeof pkDropdownInit === 'function') pkDropdownInit(content);
     }
 
     if (isAdmin && !cachedUsersList.length) {
       apiFetch('/api/admin/users').then(function (data) {
         cachedUsersList = Array.isArray(data && data.users) ? data.users : [];
         renderProfileRoles();
-      }).catch(function () {});
+      }).catch(function () { });
+    } else if (!isAdmin && projects.some(function (p) { return p.responsible_user_id; })) {
+      apiFetch('/api/assignable-users').then(function (data) {
+        cachedUsersList = Array.isArray(data && data.users) ? data.users : [];
+      }).catch(function () { cachedUsersList = []; });
     }
   }
 
@@ -709,26 +729,37 @@
     if (!content) {
       return;
     }
-    const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+    const design = localStorage.getItem('pk24_design') || 'v1';
+
     content.innerHTML = ''
       + '<div class="profile-pane">'
       + '<div class="profile-pane-title">Настройки интерфейса</div>'
-      + '<div class="profile-pane-sub">Управление темой и визуальным режимом.</div>'
-      + '<div class="profile-inline-actions">'
-      + '<button class="profile-btn" id="profile-toggle-theme">Переключить тему</button>'
-      + '<div class="profile-inline-hint">Текущая тема: ' + escapeHtml(currentTheme) + '</div>'
-      + '</div>'
+      + '<div class="profile-pane-sub">Переключение дизайна интерфейса.</div>'
+      + '<div class="profile-ui-design-row" style="margin-bottom:14px">'
+      + '<div class="profile-field-label" style="font-size:11px;color:var(--tx3);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px">Дизайн</div>'
+      + '<div class="profile-inline-actions" style="gap:12px">'
+      + '<label class="profile-radio-label"><input type="radio" name="pk24-design" value="v1"' + (design === 'v1' ? ' checked' : '') + '> Classic v1.0</label>'
+      + '<label class="profile-radio-label"><input type="radio" name="pk24-design" value="v2"' + (design === 'v2' ? ' checked' : '') + '> Hero v2.0</label>'
+      + '</div></div>'
       + '</div>';
 
-    const themeButton = document.getElementById('profile-toggle-theme');
-    if (themeButton) {
-      themeButton.onclick = function () {
-        if (typeof toggleTheme === 'function') {
-          toggleTheme();
-          renderProfileUiSettings();
+    content.querySelectorAll('input[name="pk24-design"]').forEach(function (radio) {
+      radio.onchange = function () {
+        var val = this.value;
+        localStorage.setItem('pk24_design', val);
+        if (val === 'v2') {
+          document.documentElement.setAttribute('data-design', 'v2');
+          if (typeof pkDropdownInit === 'function') {
+            pkDropdownInit(document);
+          }
+        } else {
+          document.documentElement.removeAttribute('data-design');
+          if (typeof pkDropdownDestroy === 'function') {
+            pkDropdownDestroy(document);
+          }
         }
       };
-    }
+    });
   }
 
   function renderProfilePassword() {
@@ -826,34 +857,96 @@
     });
   }
 
-  var profileHistoryFilters = { q: '', event_type: '', from: '', to: '' };
+  var profileHistoryFilters = (function () {
+    try {
+      var s = localStorage.getItem('pk24_history_filters');
+      if (s) {
+        var parsed = JSON.parse(s);
+        return {
+          q: String(parsed.q || '').trim(),
+          event_types: Array.isArray(parsed.event_types) ? parsed.event_types : [],
+          from: String(parsed.from || '').trim(),
+          to: String(parsed.to || '').trim(),
+        };
+      }
+    } catch (e) { }
+    return { q: '', event_types: [], from: '', to: '' };
+  })();
+
+  function saveHistoryFilters() {
+    try {
+      localStorage.setItem('pk24_history_filters', JSON.stringify(profileHistoryFilters));
+    } catch (e) { }
+  }
+
+  function getProfileHistoryPeriod() {
+    var proj = projects.find(function (p) { return p.id === activeProjId; });
+    var m = proj && proj.historyRetentionMonths != null ? proj.historyRetentionMonths : 3;
+    return m === 6 ? '6m' : m === 3 ? '3m' : 'all';
+  }
+
+  function getHistoryPeriodFromDate(period) {
+    period = period || getProfileHistoryPeriod();
+    if (period === '6m') {
+      var d6 = new Date();
+      d6.setMonth(d6.getMonth() - 6);
+      return d6.toISOString().slice(0, 10);
+    }
+    if (period === 'all') return '2000-01-01';
+    var d3 = new Date();
+    d3.setMonth(d3.getMonth() - 3);
+    return d3.toISOString().slice(0, 10);
+  }
 
   function renderProfileHistory() {
     var content = document.getElementById('profile-content');
     if (!content) return;
-    var projectName = getProjectName(activeProjId) || '—';
 
-    var eventTypeOptions = '<option value="">Все типы</option>'
-      + '<option value="task_created"' + (profileHistoryFilters.event_type === 'task_created' ? ' selected' : '') + '>Создание</option>'
-      + '<option value="task_updated"' + (profileHistoryFilters.event_type === 'task_updated' ? ' selected' : '') + '>Обновление</option>'
-      + '<option value="task_moved"' + (profileHistoryFilters.event_type === 'task_moved' ? ' selected' : '') + '>Перемещение</option>'
-      + '<option value="task_reordered"' + (profileHistoryFilters.event_type === 'task_reordered' ? ' selected' : '') + '>Переупорядочение</option>'
-      + '<option value="task_deleted"' + (profileHistoryFilters.event_type === 'task_deleted' ? ' selected' : '') + '>Удаление</option>'
-      + '<option value="agent_action"' + (profileHistoryFilters.event_type === 'agent_action' ? ' selected' : '') + '>Агент</option>';
+    var profileHistoryPeriod = getProfileHistoryPeriod();
+
+    var EVENT_TYPES = [
+      { id: 'task_created', label: 'Создание' },
+      { id: 'task_updated', label: 'Обновление' },
+      { id: 'task_moved', label: 'Перемещение' },
+      { id: 'task_reordered', label: 'Переупорядочение' },
+      { id: 'task_deleted', label: 'Удаление' },
+      { id: 'agent_action', label: 'Агент' },
+    ];
+    var eventTypesArr = profileHistoryFilters.event_types;
+    var allSelected = !eventTypesArr || eventTypesArr.length === 0 || eventTypesArr.length === EVENT_TYPES.length;
+    var eventTypeCheckboxes = EVENT_TYPES.map(function (et) {
+      var checked = allSelected || (Array.isArray(eventTypesArr) && eventTypesArr.indexOf(et.id) >= 0);
+      return '<label class="hist-type-cb"><input type="checkbox" value="' + escapeHtml(et.id) + '"' + (checked ? ' checked' : '') + '> ' + escapeHtml(et.label) + '</label>';
+    }).join('');
+
+    var periodOptions = '<option value="3m"' + (profileHistoryPeriod === '3m' ? ' selected' : '') + '>3 месяца</option>'
+      + '<option value="6m"' + (profileHistoryPeriod === '6m' ? ' selected' : '') + '>6 месяцев</option>'
+      + '<option value="all"' + (profileHistoryPeriod === 'all' ? ' selected' : '') + '>С начала проекта</option>';
+
+    var retentionWarning = 'При укорочении срока хранения (6→3 мес. или «с начала»→ограниченный).<br>Все события старше выбранного периода будут <strong>безвозвратно удалены</strong>.';
 
     content.innerHTML = ''
       + '<div class="profile-pane">'
       + '<div class="profile-pane-title">История действий</div>'
-      + '<div class="profile-pane-sub">Аудит-события активного проекта «' + escapeHtml(projectName) + '».</div>'
       + (activeProjId
-        ? '<div class="pf-search-row">'
+        ? '<div class="profile-history-settings-row">'
+        + '<div class="profile-field hist-period-field">'
+        + '<div class="profile-field-label">Сколько храним историю</div>'
+        + '<select class="profile-input" id="hist-period">' + periodOptions + '</select>'
+        + '</div>'
+        + '<div class="hist-retention-warn">' + retentionWarning + '</div>'
+        + '</div>'
+        + '<div class="pf-search-row">'
         + '<input class="profile-input" id="hist-filter-q" placeholder="Поиск по ID задачи, типу события, деталям..." value="' + escapeHtml(profileHistoryFilters.q) + '">'
         + '<button class="pf-search-clear" id="hist-search-clear" title="Очистить поиск" style="' + (profileHistoryFilters.q ? '' : 'display:none') + '">&times;</button>'
         + '</div>'
         + '<div class="pf-filter-row">'
-        + '<select class="profile-input" id="hist-filter-type">' + eventTypeOptions + '</select>'
-        + '<input class="profile-input" id="hist-filter-from" type="date" title="С даты" value="' + escapeHtml(profileHistoryFilters.from) + '">'
-        + '<input class="profile-input" id="hist-filter-to" type="date" title="По дату" value="' + escapeHtml(profileHistoryFilters.to) + '">'
+        + '<div class="hist-type-dropdown-wrap">'
+        + '<button type="button" class="profile-input hist-type-toggle" id="hist-type-toggle">Типы событий</button>'
+        + '<div class="hist-type-dropdown" id="hist-type-dropdown">' + eventTypeCheckboxes + '</div>'
+        + '</div>'
+        + '<input class="profile-input" id="hist-filter-from" type="date" title="С даты" value="' + escapeHtml(profileHistoryFilters.from || getHistoryPeriodFromDate(profileHistoryPeriod)) + '">'
+        + '<input class="profile-input" id="hist-filter-to" type="date" title="По дату" value="' + escapeHtml(profileHistoryFilters.to || new Date().toISOString().slice(0, 10)) + '">'
         + '<button class="pf-filter-btn apply" id="hist-apply-btn">Применить</button>'
         + '<button class="pf-filter-btn reset" id="hist-reset-btn">Сбросить</button>'
         + '</div>'
@@ -868,10 +961,50 @@
       var resetBtn = document.getElementById('hist-reset-btn');
       var clearBtn = document.getElementById('hist-search-clear');
       var qInput = document.getElementById('hist-filter-q');
+      var periodSelect = document.getElementById('hist-period');
+
+      if (periodSelect) {
+        periodSelect.onchange = function () {
+          var newVal = periodSelect.value || '3m';
+          var oldVal = getProfileHistoryPeriod();
+          var retentionMonths = newVal === '6m' ? 6 : newVal === '3m' ? 3 : null;
+          var isShortening = (oldVal === 'all' && newVal !== 'all') || (oldVal === '6m' && newVal === '3m');
+          if (isShortening) {
+            var msg = newVal === '3m'
+              ? 'Переключение на 3 месяца безвозвратно удалит все события старше 3 месяцев. Продолжить?'
+              : 'Переключение на 6 месяцев безвозвратно удалит все события старше 6 месяцев. Продолжить?';
+            if (!confirm(msg)) {
+              periodSelect.value = oldVal;
+              return;
+            }
+          }
+          apiFetch('/projects/' + activeProjId + '/history-retention', {
+            method: 'POST',
+            body: { retention_months: retentionMonths },
+          }).then(function (data) {
+            var proj = projects.find(function (p) { return p.id === activeProjId; });
+            if (proj && data && data.project) {
+              proj.historyRetentionMonths = data.project.history_retention_months;
+            }
+            var fromEl = document.getElementById('hist-filter-from');
+            var toEl = document.getElementById('hist-filter-to');
+            if (fromEl && !profileHistoryFilters.from) fromEl.value = getHistoryPeriodFromDate(newVal);
+            if (toEl && !profileHistoryFilters.to) toEl.value = new Date().toISOString().slice(0, 10);
+            applyHistoryFilters();
+            if (data && data.deleted_events > 0) {
+              showInfo('Удалено событий старше срока: ' + data.deleted_events);
+            }
+          }).catch(function (err) {
+            periodSelect.value = oldVal;
+            showError('Не удалось изменить срок хранения: ' + (err.message || err));
+          });
+        };
+      }
 
       if (applyBtn) applyBtn.onclick = function () { applyHistoryFilters(); };
       if (resetBtn) resetBtn.onclick = function () {
-        profileHistoryFilters = { q: '', event_type: '', from: '', to: '' };
+        profileHistoryFilters = { q: '', event_types: [], from: '', to: '' };
+        saveHistoryFilters();
         renderProfileHistory();
       };
       if (clearBtn) clearBtn.onclick = function () {
@@ -887,13 +1020,36 @@
         };
         qInput.onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); applyHistoryFilters(); } };
       }
+
+      var typeToggle = document.getElementById('hist-type-toggle');
+      var typeDropdown = document.getElementById('hist-type-dropdown');
+      if (typeToggle && typeDropdown) {
+        typeToggle.onclick = function (e) {
+          e.stopPropagation();
+          var wasOpen = typeDropdown.classList.contains('open');
+          typeDropdown.classList.toggle('open');
+          if (!wasOpen) {
+            setTimeout(function () {
+              function closeHandler() {
+                document.removeEventListener('click', closeHandler);
+                typeDropdown.classList.remove('open');
+              }
+              document.addEventListener('click', closeHandler);
+            }, 0);
+          }
+        };
+        typeDropdown.onclick = function (e) { e.stopPropagation(); };
+      }
     }
 
     function applyHistoryFilters() {
       profileHistoryFilters.q = String((document.getElementById('hist-filter-q') || {}).value || '').trim();
-      profileHistoryFilters.event_type = String((document.getElementById('hist-filter-type') || {}).value || '').trim();
+      var typeCheckboxes = document.querySelectorAll('#hist-type-dropdown input[type="checkbox"]:checked');
+      var checkedTypes = Array.prototype.slice.call(typeCheckboxes || []).map(function (cb) { return cb.value; });
+      profileHistoryFilters.event_types = checkedTypes.length === EVENT_TYPES.length ? [] : checkedTypes;
       profileHistoryFilters.from = String((document.getElementById('hist-filter-from') || {}).value || '').trim();
       profileHistoryFilters.to = String((document.getElementById('hist-filter-to') || {}).value || '').trim();
+      saveHistoryFilters();
       loadHistoryEvents();
     }
 
@@ -902,12 +1058,17 @@
       if (!listEl) return;
       listEl.innerHTML = '<div class="profile-empty">Загрузка событий...</div>';
 
-      var params = new URLSearchParams();
-      params.set('limit', '200');
+      function doFetchEvents() {
+        var params = new URLSearchParams();
+      params.set('limit', '500');
       if (profileHistoryFilters.q) params.set('q', profileHistoryFilters.q);
-      if (profileHistoryFilters.event_type) params.set('event_type', profileHistoryFilters.event_type);
-      if (profileHistoryFilters.from) params.set('from', profileHistoryFilters.from);
-      if (profileHistoryFilters.to) params.set('to', profileHistoryFilters.to);
+      if (profileHistoryFilters.event_types && profileHistoryFilters.event_types.length > 0) {
+        params.set('event_types', profileHistoryFilters.event_types.join(','));
+      }
+      var fromVal = profileHistoryFilters.from || getHistoryPeriodFromDate(getProfileHistoryPeriod());
+      var toVal = profileHistoryFilters.to || new Date().toISOString().slice(0, 10);
+      params.set('from', fromVal);
+      params.set('to', toVal);
 
       var EVENT_LABELS = {
         task_created: '✦ Создана', task_updated: '✎ Обновлена', task_moved: '→ Перемещена',
@@ -925,17 +1086,47 @@
           var rows = events.map(function (ev) {
             var label = EVENT_LABELS[ev.event_type] || escapeHtml(ev.event_type);
             var color = EVENT_COLORS[ev.event_type] || 'var(--tx2)';
-            var taskId = ev.task_id ? String(ev.task_id).slice(0, 8) + '…' : '—';
-            var detail = '';
-            if (ev.payload) {
-              if (ev.payload.from_col && ev.payload.to_col) detail = escapeHtml(ev.payload.from_col) + ' → ' + escapeHtml(ev.payload.to_col);
-              else if (ev.payload.title) detail = escapeHtml(ev.payload.title);
-              else if (Array.isArray(ev.payload.fields_changed)) detail = ev.payload.fields_changed.map(escapeHtml).join(', ');
+            var taskIdShort = ev.task_id ? String(ev.task_id).slice(0, 8) + '…' : '—';
+            var taskTitle = (ev.payload && ev.payload.title) || (ev.after && ev.after.title) || (ev.before && ev.before.title) || null;
+            if (!taskTitle && ev.task_id && typeof tasks !== 'undefined' && Array.isArray(tasks)) {
+              var t = tasks.find(function (x) { return x.id === ev.task_id || x.raw_id === ev.task_id; });
+              if (t) taskTitle = t.title;
             }
-            return '<div class="profile-role-row" style="gap:10px;align-items:flex-start">'
+            var taskTitleEsc = taskTitle ? escapeHtml(taskTitle) : '—';
+            var actorStr = ev.actor_email ? ' Кем: ' + escapeHtml(ev.actor_email) : '';
+            var detail = '';
+            if (ev.event_type === 'task_moved' && ev.payload && ev.payload.from_col && ev.payload.to_col) {
+              detail = 'Из ' + escapeHtml(ev.payload.from_col) + ' в ' + escapeHtml(ev.payload.to_col) + '.' + actorStr;
+            } else if (ev.event_type === 'task_updated' && ev.payload && Array.isArray(ev.payload.fields_changed) && ev.payload.fields_changed.length) {
+              var changes = ev.payload.fields_changed.map(function (f) {
+                var b = ev.before && ev.before[f];
+                var a = ev.after && ev.after[f];
+                if (f === 'title' || f === 'col' || f === 'stage') {
+                  return escapeHtml(f) + ': ' + escapeHtml(String(b || '—')) + ' → ' + escapeHtml(String(a || '—'));
+                }
+                return escapeHtml(f);
+              }).join('; ');
+              detail = changes + actorStr;
+            } else if (ev.event_type === 'task_reordered' && ev.payload) {
+              var col = ev.payload.column || '';
+              var pos = ev.payload.position != null ? Number(ev.payload.position) + 1 : '';
+              detail = 'Столбец ' + escapeHtml(col) + (pos ? ', позиция ' + pos : '') + '.' + actorStr;
+            } else if (ev.event_type === 'task_created' && ev.payload) {
+              detail = (ev.payload.source ? escapeHtml(ev.payload.source) : (ev.payload.title ? escapeHtml(ev.payload.title) : '')) + actorStr;
+            } else if (ev.payload && ev.payload.title) {
+              detail = escapeHtml(ev.payload.title) + actorStr;
+            } else if (ev.payload && Array.isArray(ev.payload.fields_changed)) {
+              detail = ev.payload.fields_changed.map(escapeHtml).join(', ') + actorStr;
+            } else if (actorStr) {
+              detail = actorStr.trim();
+            }
+            return '<div class="profile-role-row hist-row" style="gap:10px;align-items:flex-start;cursor:default">'
               + '<div style="font-size:11px;color:' + color + ';font-weight:600;flex-shrink:0;min-width:110px">' + label + '</div>'
-              + '<div style="font-size:11px;color:var(--tx3);flex-shrink:0;min-width:70px;font-family:\'DM Mono\',monospace">' + escapeHtml(taskId) + '</div>'
-              + '<div style="font-size:11px;color:var(--tx2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (detail || '—') + '</div>'
+              + '<div style="font-size:11px;color:var(--tx3);flex-shrink:0;min-width:70px;font-family:\'DM Mono\',monospace">' + escapeHtml(taskIdShort) + '</div>'
+              + '<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">'
+              + '<div style="font-size:12px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + taskTitleEsc + '</div>'
+              + '<div style="font-size:11px;color:var(--tx3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (detail || '—') + '</div>'
+              + '</div>'
               + '<div style="font-size:10px;color:var(--tx4);flex-shrink:0;white-space:nowrap">' + escapeHtml(formatDateTime(ev.created_at)) + '</div>'
               + '</div>';
           }).join('');
@@ -944,9 +1135,13 @@
         .catch(function (err) {
           if (listEl) listEl.innerHTML = '<div class="profile-empty">Ошибка загрузки: ' + escapeHtml(err.message) + '</div>';
         });
+      }
+
+      doFetchEvents();
     }
 
     bindHistFilters();
+    if (typeof pkDropdownInit === 'function') pkDropdownInit(content);
     loadHistoryEvents();
   }
 
@@ -1009,7 +1204,6 @@
       + '<button class="bridge-confirm-btn yes" id="uc-confirm">Создать</button>'
       + '</div></div>';
     document.body.appendChild(ov);
-    ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
     document.getElementById('uc-cancel').onclick = function () { ov.remove(); };
     document.getElementById('uc-confirm').onclick = function () {
       var email = (document.getElementById('uc-email') || {}).value || '';
@@ -1043,7 +1237,6 @@
       + '<button class="bridge-confirm-btn yes" id="ue-save">Сохранить</button>'
       + '</div></div>';
     document.body.appendChild(ov);
-    ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
     document.getElementById('ue-cancel').onclick = function () { ov.remove(); };
     document.getElementById('ue-save').onclick = function () {
       var body = {};
@@ -1081,7 +1274,6 @@
       + '<button class="bridge-confirm-btn yes" id="ud-transfer">Перенести и удалить</button>'
       + '</div></div>';
     document.body.appendChild(ov);
-    ov.addEventListener('click', function (e) { if (e.target === ov) ov.remove(); });
     document.getElementById('ud-cancel').onclick = function () { ov.remove(); };
     document.getElementById('ud-transfer').onclick = function () {
       var target = (document.getElementById('ud-target') || {}).value || '';
@@ -1384,8 +1576,8 @@
       const rows = Array.isArray(response && response.items)
         ? response.items
         : Array.isArray(response && response.tasks)
-        ? response.tasks
-        : [];
+          ? response.tasks
+          : [];
       profileTrashItems = rows.map(mapDeletedTaskFromApi);
       if (Array.isArray(response && response.deleted_by_users)) {
         trashDeletedByUsers = response.deleted_by_users;
@@ -1425,11 +1617,6 @@
         + '</div>'
         + '</div>';
       document.body.appendChild(overlay);
-      overlay.addEventListener('click', function (event) {
-        if (event.target === overlay) {
-          overlay.remove();
-        }
-      });
     }
 
     overlay.classList.add('open');
@@ -1475,7 +1662,8 @@
       projectSelect.value = projects[0].id;
     }
 
-    colSelect.innerHTML = COLS.map(function (col) {
+    var colsForTrash = typeof getProjectColumns === 'function' ? getProjectColumns() : [{ id: 'backlog', label: 'Backlog' }, { id: 'todo', label: 'To Do' }, { id: 'inprogress', label: 'In Progress' }, { id: 'review', label: 'Review' }, { id: 'done', label: 'Done' }];
+    colSelect.innerHTML = colsForTrash.map(function (col) {
       return '<option value="' + col.id + '">' + escapeHtml(col.label) + '</option>';
     }).join('');
     colSelect.value = item.col || 'backlog';
@@ -1614,11 +1802,6 @@
         + '</div>'
         + '</div>';
       document.body.appendChild(overlay);
-      overlay.addEventListener('click', function (event) {
-        if (event.target === overlay) {
-          overlay.remove();
-        }
-      });
     }
 
     overlay.classList.add('open');
@@ -1650,78 +1833,6 @@
         showError('Permanent delete failed: ' + error.message);
       }
     };
-  }
-
-  function renderProfileHistory() {
-    const content = document.getElementById('profile-content');
-    if (!content) { return; }
-
-    const projectName = getProjectName(activeProjId) || '—';
-
-    content.innerHTML = ''
-      + '<div class="profile-pane">'
-      + '<div class="profile-pane-title">История действий</div>'
-      + '<div class="profile-pane-sub">Последние 100 событий активного проекта из audit trail (task_events).</div>'
-      + (activeProjId
-        ? '<div id="profile-history-list"><div class="profile-empty">Загрузка событий...</div></div>'
-        : '<div class="profile-empty">Выберите активный проект, чтобы увидеть историю.</div>')
-      + '</div>';
-
-    if (!activeProjId) { return; }
-
-    (async function () {
-      const listEl = document.getElementById('profile-history-list');
-      if (!listEl) { return; }
-      try {
-        const EVENT_LABELS = {
-          task_created:   '✦ Создана',
-          task_updated:   '✎ Обновлена',
-          task_moved:     '→ Перемещена',
-          task_reordered: '⇅ Переупорядочена',
-          task_deleted:   '✕ Удалена',
-          agent_action:   '⚡ Агент',
-        };
-        const EVENT_COLORS = {
-          task_created:   'var(--green)',
-          task_updated:   'var(--gold)',
-          task_moved:     'var(--c-A)',
-          task_reordered: 'var(--tx3)',
-          task_deleted:   'var(--red)',
-          agent_action:   'var(--c-R1)',
-        };
-        const data = await apiFetch('/projects/' + activeProjId + '/events?limit=100');
-        const events = Array.isArray(data && data.events) ? data.events : [];
-        if (!events.length) {
-          listEl.innerHTML = '<div class="profile-empty">Событий не найдено.</div>';
-          return;
-        }
-        const rows = events.map(function (ev) {
-          const label = EVENT_LABELS[ev.event_type] || escapeHtml(ev.event_type);
-          const color = EVENT_COLORS[ev.event_type] || 'var(--tx2)';
-          const taskId = ev.task_id ? String(ev.task_id).slice(0, 8) + '…' : '—';
-          let detail = '';
-          if (ev.payload) {
-            if (ev.payload.from_col && ev.payload.to_col) {
-              detail = escapeHtml(ev.payload.from_col) + ' → ' + escapeHtml(ev.payload.to_col);
-            } else if (ev.payload.title) {
-              detail = escapeHtml(ev.payload.title);
-            } else if (Array.isArray(ev.payload.fields_changed)) {
-              detail = ev.payload.fields_changed.map(escapeHtml).join(', ');
-            }
-          }
-          return ''
-            + '<div class="profile-role-row" style="gap:10px;align-items:flex-start">'
-            + '<div style="font-size:11px;color:' + color + ';font-weight:600;flex-shrink:0;min-width:110px">' + label + '</div>'
-            + '<div style="font-size:11px;color:var(--tx3);flex-shrink:0;min-width:70px;font-family:\'DM Mono\',monospace">' + escapeHtml(taskId) + '</div>'
-            + '<div style="font-size:11px;color:var(--tx2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (detail || '—') + '</div>'
-            + '<div style="font-size:10px;color:var(--tx4);flex-shrink:0;white-space:nowrap">' + escapeHtml(formatDateTime(ev.created_at)) + '</div>'
-            + '</div>';
-        }).join('');
-        listEl.innerHTML = '<div class="profile-role-list">' + rows + '</div>';
-      } catch (err) {
-        if (listEl) { listEl.innerHTML = '<div class="profile-empty">Ошибка загрузки: ' + escapeHtml(err.message) + '</div>'; }
-      }
-    })();
   }
 
   const PURPOSE_KEYS = ['new_task', 'chat', 'import_parse'];
@@ -1833,9 +1944,9 @@
       var cb = wrap.querySelector('.profile-llm-card-override-cb');
       var inner = wrap.querySelector('.profile-llm-card-override-inner');
       if (cb && inner) {
-        cb.checked = !!(s && s.is_enabled);
+        cb.checked = !!(s && s.is_individual_override);
         inner.style.display = cb.checked ? 'block' : 'none';
-        if (s && s.is_enabled) {
+        if (s && s.is_individual_override) {
           var prov = wrap.querySelector('.profile-llm-card-provider');
           var mod = wrap.querySelector('.profile-llm-card-model');
           var key = wrap.querySelector('.profile-llm-card-apikey');
@@ -2279,9 +2390,12 @@
           } else if (existing && existing.id) {
             var baseCfg = profileLlmSettingsCache.find(function (s) { return s.purpose !== purpose && s.provider && s.model; }) || profileLlmSettingsCache[0];
             if (baseCfg && baseCfg.provider && baseCfg.model) {
-              promises.push(apiFetch('/api/llm/provider-settings', { method: 'POST', body: { purpose: purpose, provider: baseCfg.provider, model: baseCfg.model, is_enabled: true, is_individual_override: false } }));
+              promises.push(apiFetch('/api/llm/provider-settings/' + existing.id, {
+                method: 'PATCH',
+                body: { is_individual_override: false, provider: baseCfg.provider, model: baseCfg.model },
+              }));
             } else {
-              promises.push(apiFetch('/api/llm/provider-settings/' + existing.id, { method: 'DELETE' }));
+              promises.push(apiFetch('/api/llm/provider-settings/' + existing.id, { method: 'PATCH', body: { is_individual_override: false } }));
             }
           }
         });
@@ -2298,9 +2412,9 @@
             var cb = wrap.querySelector('.profile-llm-card-override-cb');
             var inner = wrap.querySelector('.profile-llm-card-override-inner');
             if (cb && inner) {
-              cb.checked = !!(s && s.is_enabled);
+              cb.checked = !!(s && s.is_individual_override);
               inner.style.display = cb.checked ? 'block' : 'none';
-              if (s && s.is_enabled) {
+              if (s && s.is_individual_override) {
                 var prov = wrap.querySelector('.profile-llm-card-provider');
                 var mod = wrap.querySelector('.profile-llm-card-model');
                 if (prov) prov.value = s.provider || 'anthropic';
@@ -2323,9 +2437,9 @@
         var cb = wrap.querySelector('.profile-llm-card-override-cb');
         var inner = wrap.querySelector('.profile-llm-card-override-inner');
         if (cb && inner) {
-          cb.checked = !!(s && s.is_enabled);
+          cb.checked = !!(s && s.is_individual_override);
           inner.style.display = cb.checked ? 'block' : 'none';
-          if (s && s.is_enabled) {
+          if (s && s.is_individual_override) {
             var prov = wrap.querySelector('.profile-llm-card-provider');
             var mod = wrap.querySelector('.profile-llm-card-model');
             if (prov) prov.value = s.provider || 'anthropic';
@@ -2341,6 +2455,93 @@
     var n = Number(val);
     if (n === 0 || !Number.isFinite(n)) return 'нет данных';
     return n.toFixed(4);
+  }
+
+  const LLM_KEYS_PROVIDERS = [
+    { value: 'anthropic', label: 'Anthropic (Claude)' },
+    { value: 'openai', label: 'OpenAI (GPT)' },
+    { value: 'deepseek', label: 'DeepSeek' },
+    { value: 'groq', label: 'Groq' },
+    { value: 'qwen', label: 'Qwen' },
+    { value: 'custom', label: 'Custom' },
+  ];
+
+  function renderProfileLlmKeys() {
+    var content = document.getElementById('profile-content');
+    if (!content) return;
+    content.innerHTML = '<div class="profile-pane"><div class="profile-pane-title">API-ключи провайдеров</div><div class="profile-pane-sub">Загрузка...</div></div>';
+    apiFetch('/api/llm/api-keys').catch(function () { return { keys: [] }; }).then(function (res) {
+      var keys = res.keys || [];
+      var hasKeyMap = {};
+      keys.forEach(function (k) { if (k.has_key) hasKeyMap[k.provider] = true; });
+      var html = '<div class="profile-pane"><div class="profile-pane-title">API-ключи провайдеров</div>'
+        + '<div class="profile-pane-sub" style="margin-bottom:16px">Настройте API-ключи для выбранных провайдеров. Провайдер и модель выбираются при каждой операции (создание задачи, чат, импорт).</div>';
+      LLM_KEYS_PROVIDERS.forEach(function (p) {
+        var hasKey = hasKeyMap[p.value];
+        var provId = 'pk-keys-' + p.value;
+        html += '<div class="profile-llm-keys-card" data-provider="' + escapeHtml(p.value) + '"' + (hasKey ? ' data-has-key="1"' : '') + '>'
+          + '<div class="profile-llm-keys-card-title">' + escapeHtml(p.label) + '</div>'
+          + '<div class="profile-llm-form-row" style="align-items:center;gap:10px;flex-wrap:wrap">'
+          + '<input type="password" id="' + provId + '" class="ps-input profile-llm-keys-input" style="flex:1;min-width:200px;max-width:320px" placeholder="' + (hasKey ? '•••••••• (уже настроен)' : 'Введите API-ключ') + '" autocomplete="new-password" readonly onfocus="this.removeAttribute(\'readonly\')">';
+        if (p.value === 'custom') {
+          html += '<input type="text" class="ps-input profile-llm-keys-baseurl" style="flex:1;min-width:180px;max-width:280px" placeholder="Base URL (обязательно)">';
+        }
+        html += '<button type="button" class="profile-btn-capsule profile-llm-keys-save" data-provider="' + escapeHtml(p.value) + '">Сохранить</button>';
+        if (hasKey) {
+          html += '<button type="button" class="profile-btn-capsule profile-btn-danger profile-llm-keys-delete" data-provider="' + escapeHtml(p.value) + '">Удалить ключ</button>';
+        }
+        html += '</div><div class="profile-llm-keys-status profile-llm-verify-status profile-llm-keys-status-fixed' + (hasKey ? ' ok' : '') + '" data-state="' + (hasKey ? 'ok' : '') + '">' + (hasKey ? '✓ Ключ настроен' : '') + '</div></div>';
+      });
+      html += '</div>';
+      content.innerHTML = html;
+      content.querySelectorAll('.profile-llm-keys-save').forEach(function (btn) {
+        btn.onclick = function () {
+          var provider = btn.getAttribute('data-provider');
+          var card = btn.closest('.profile-llm-keys-card');
+          var input = card ? card.querySelector('.profile-llm-keys-input') : null;
+          var baseInput = card ? card.querySelector('.profile-llm-keys-baseurl') : null;
+          var status = card ? card.querySelector('.profile-llm-keys-status') : null;
+          var apiKey = input ? input.value.trim() : '';
+          var baseUrl = baseInput ? baseInput.value.trim() || null : null;
+          if (!apiKey) { if (status) { status.textContent = 'Введите ключ'; status.className = 'profile-llm-keys-status profile-llm-verify-status profile-llm-keys-status-fixed error'; status.setAttribute('data-state', 'error'); } return; }
+          if (provider === 'custom' && !baseUrl) { if (status) { status.textContent = 'Для Custom укажите Base URL'; status.className = 'profile-llm-keys-status profile-llm-verify-status profile-llm-keys-status-fixed error'; status.setAttribute('data-state', 'error'); } return; }
+          if (status) { status.textContent = 'Проверка ключа...'; status.className = 'profile-llm-keys-status profile-llm-verify-status profile-llm-keys-status-fixed'; status.removeAttribute('data-state'); }
+          var testBody = { provider: provider, model: typeof getDefaultTestModel === 'function' ? getDefaultTestModel(provider) : 'gpt-4o-mini', apiKey: apiKey };
+          if (baseUrl) testBody.baseUrl = baseUrl;
+          apiFetch('/api/llm/settings/test', { method: 'POST', body: testBody })
+            .then(function (res) {
+              if (res && res.ok) {
+                if (status) { status.textContent = '✓ Ключ принят. Сохранение...'; status.className = 'profile-llm-keys-status profile-llm-verify-status profile-llm-keys-status-fixed ok'; status.setAttribute('data-state', 'ok'); }
+                var saveBody = { provider: provider, api_key: apiKey }; if (baseUrl) saveBody.base_url = baseUrl;
+                return apiFetch('/api/llm/api-keys', { method: 'POST', body: saveBody }).then(function () {
+                  if (status) { status.textContent = '✓ Ключ принят и сохранён'; status.className = 'profile-llm-keys-status profile-llm-verify-status profile-llm-keys-status-fixed ok'; status.setAttribute('data-state', 'ok'); }
+                  if (input) { input.placeholder = '•••••••• (уже настроен)'; input.value = ''; }
+                  setTimeout(function () { renderProfileLlmKeys(); }, 2500);
+                });
+              } else {
+                var errMsg = (res && res.error) ? res.error : 'Ключ отклонён';
+                if (status) { status.textContent = '✗ Ключ отклонён: ' + errMsg; status.className = 'profile-llm-keys-status profile-llm-verify-status profile-llm-keys-status-fixed error'; status.setAttribute('data-state', 'error'); }
+              }
+            })
+            .catch(function (err) {
+              var errMsg = (err && err.body && err.body.message) ? err.body.message : (err && err.message) ? err.message : 'Ошибка проверки ключа';
+              if (status) { status.textContent = '✗ Ключ отклонён: ' + errMsg; status.className = 'profile-llm-keys-status profile-llm-verify-status profile-llm-keys-status-fixed error'; status.setAttribute('data-state', 'error'); }
+            });
+        };
+      });
+      content.querySelectorAll('.profile-llm-keys-delete').forEach(function (btn) {
+        btn.onclick = function () {
+          var provider = btn.getAttribute('data-provider');
+          if (!confirm('Удалить API-ключ для ' + provider + '?')) return;
+          var card = btn.closest('.profile-llm-keys-card');
+          var status = card ? card.querySelector('.profile-llm-keys-status') : null;
+          if (status) { status.textContent = 'Удаление...'; status.className = 'profile-llm-keys-status profile-llm-verify-status profile-llm-keys-status-fixed'; }
+          apiFetch('/api/llm/api-keys/' + encodeURIComponent(provider), { method: 'DELETE' })
+            .then(function () { if (status) { status.textContent = '✓ Удалено'; status.className = 'profile-llm-keys-status profile-llm-verify-status profile-llm-keys-status-fixed ok'; } setTimeout(function () { renderProfileLlmKeys(); }, 2000); })
+            .catch(function (err) { if (status) { status.textContent = '✗ ' + (err.body && err.body.message || err.message || 'Ошибка'); status.className = 'profile-llm-keys-status profile-llm-verify-status profile-llm-keys-status-fixed error'; } });
+        };
+      });
+    });
   }
 
   function renderProfileLlmUsage() {
@@ -2366,8 +2567,8 @@
         byModelHtml = '<div class="profile-pane-title" style="margin-top:20px">По моделям</div>'
           + '<table class="profile-table profile-llm-usage-table"><thead><tr><th>Провайдер</th><th>Модель</th><th>Запросов</th><th>Вход (токены)</th><th>Выход (токены)</th><th>USD</th></tr></thead><tbody>'
           + byModel.map(function (r) {
-              return '<tr><td>' + escapeHtml(r.provider) + '</td><td>' + escapeHtml(r.model) + '</td><td>' + r.count + '</td><td>' + (r.input_tokens || 0).toLocaleString() + '</td><td>' + (r.output_tokens || 0).toLocaleString() + '</td><td>' + escapeHtml(formatCostUsd(r.cost_usd)) + '</td></tr>';
-            }).join('')
+            return '<tr><td>' + escapeHtml(r.provider) + '</td><td>' + escapeHtml(r.model) + '</td><td>' + r.count + '</td><td>' + (r.input_tokens || 0).toLocaleString() + '</td><td>' + (r.output_tokens || 0).toLocaleString() + '</td><td>' + escapeHtml(formatCostUsd(r.cost_usd)) + '</td></tr>';
+          }).join('')
           + '</tbody></table>';
       }
       var byPurposeHtml = '';
@@ -2375,17 +2576,17 @@
         byPurposeHtml = '<div class="profile-pane-title" style="margin-top:20px">По назначению</div>'
           + '<table class="profile-table profile-llm-usage-table"><thead><tr><th>Назначение</th><th>Запросов</th><th>Вход (токены)</th><th>Выход (токены)</th><th>USD</th></tr></thead><tbody>'
           + byPurpose.map(function (r) {
-              return '<tr><td>' + escapeHtml(purposeLabel(r.purpose)) + '</td><td>' + r.count + '</td><td>' + (r.input_tokens || 0).toLocaleString() + '</td><td>' + (r.output_tokens || 0).toLocaleString() + '</td><td>' + escapeHtml(formatCostUsd(r.cost_usd)) + '</td></tr>';
-            }).join('')
+            return '<tr><td>' + escapeHtml(purposeLabel(r.purpose)) + '</td><td>' + r.count + '</td><td>' + (r.input_tokens || 0).toLocaleString() + '</td><td>' + (r.output_tokens || 0).toLocaleString() + '</td><td>' + escapeHtml(formatCostUsd(r.cost_usd)) + '</td></tr>';
+          }).join('')
           + '</tbody></table>';
       }
       var rowsHtml = '<div class="profile-pane-title" style="margin-top:20px">Детализация запросов</div>';
       if (rows.length) {
         rowsHtml += '<div class="profile-llm-usage-detail-wrap"><table class="profile-table profile-llm-usage-table"><thead><tr><th>Дата</th><th>Назначение</th><th>Провайдер</th><th>Модель</th><th>Вход</th><th>Выход</th><th>USD</th><th>Статус</th></tr></thead><tbody>'
           + rows.map(function (r) {
-              var dt = r.created_at ? (typeof formatDateTime === 'function' ? formatDateTime(r.created_at) : r.created_at) : '—';
-              return '<tr><td>' + escapeHtml(dt) + '</td><td>' + escapeHtml(purposeLabel(r.purpose)) + '</td><td>' + escapeHtml(r.provider) + '</td><td>' + escapeHtml(r.model) + '</td><td>' + (r.input_tokens != null ? r.input_tokens.toLocaleString() : '—') + '</td><td>' + (r.output_tokens != null ? r.output_tokens.toLocaleString() : '—') + '</td><td>' + escapeHtml(formatCostUsd(r.cost_estimate_usd)) + '</td><td>' + (r.status === 'ok' ? '✓' : '✗ ' + escapeHtml(r.error_code || 'error')) + '</td></tr>';
-            }).join('')
+            var dt = r.created_at ? (typeof formatDateTime === 'function' ? formatDateTime(r.created_at) : r.created_at) : '—';
+            return '<tr><td>' + escapeHtml(dt) + '</td><td>' + escapeHtml(purposeLabel(r.purpose)) + '</td><td>' + escapeHtml(r.provider) + '</td><td>' + escapeHtml(r.model) + '</td><td>' + (r.input_tokens != null ? r.input_tokens.toLocaleString() : '—') + '</td><td>' + (r.output_tokens != null ? r.output_tokens.toLocaleString() : '—') + '</td><td>' + escapeHtml(formatCostUsd(r.cost_estimate_usd)) + '</td><td>' + (r.status === 'ok' ? '✓' : '✗ ' + escapeHtml(r.error_code || 'error')) + '</td></tr>';
+          }).join('')
           + '</tbody></table></div>';
       } else {
         rowsHtml += '<div class="profile-empty">Нет записей</div>';
@@ -2479,9 +2680,7 @@
     if (sub === 'roles') { renderProfileRoles(); return; }
     if (sub === 'history') { renderProfileHistory(); return; }
     if (sub === 'trash') { renderProfileTrash(); loadDeletedTasks(); return; }
-    if (sub === 'llm_basic') { renderProfileLlmBasic(); return; }
-    if (sub === 'llm_individual') { renderProfileLlmIndividual(); return; }
-    if (sub === 'llm' || sub === 'llm_basic') { renderProfileLlmBasic(); return; }
+    if (sub === 'llm_keys' || sub === 'llm' || sub === 'llm_basic') { renderProfileLlmKeys(); return; }
     if (sub === 'llm_usage') { renderProfileLlmUsage(); return; }
     if (sub === 'metrics_project' || sub === 'metrics_tasks' || sub === 'metrics_time' || sub === 'metrics_budget') {
       if (window.PlanKanbanAnalytics && typeof window.PlanKanbanAnalytics.renderSection === 'function') {
@@ -2495,11 +2694,16 @@
       return;
     }
     if (sub === 'theme') { renderProfileThemeSettings(); return; }
-    if (sub === 'design') { renderProfileStub('Дизайн интерфейса', 'Скоро: выбор дизайна интерфейса. Планируется несколько вариантов оформления.', ['Классический', 'Современный', 'Минимальный']); return; }
+    if (sub === 'design') { renderProfileUiSettings(); return; }
     if (sub === 'notifications') { renderProfileStub('Уведомления', 'Настройка уведомлений по email и в приложении.', ['Email-уведомления', 'Напоминания', 'Сводки']); return; }
     if (sub === 'rights') { if (userRole === 'admin') { renderProfileRights(); } else { renderProfileStub('Права', 'Доступ ограничен. Обратитесь к администратору.', []); } return; }
     if (sub === 'data_deletion') { if (userRole === 'admin') { renderProfileDataDeletion(); } else { renderProfileStub('Удаление данных', 'Доступ ограничен. Только администратор может удалять данные.', []); } return; }
     if (sub === 'logout') { renderProfileLogout(); return; }
+    if (sub === 'doc_profile') { renderProfileStub('Документация: Профиль', 'Руководство по аккаунту, данным сессии, смене пароля.', ['Аккаунт', 'Текущий проект', 'Безопасность']); return; }
+    if (sub === 'doc_llm') { renderProfileStub('Документация: LLM', 'Настройка ИИ-провайдеров, моделей и API-ключей.', ['Базовые настройки', 'Индивидуальные провайдеры', 'Статистика запросов']); return; }
+    if (sub === 'doc_projects') { renderProfileStub('Документация: Проекты и задачи', 'Работа с проектами, доской канбан, задачами и ролями.', ['Проекты', 'Задачи и колонки', 'История действий']); return; }
+    if (sub === 'doc_analytics') { renderProfileStub('Документация: Аналитика', 'Метрики проектов, задач, времени и бюджетов.', ['Проекты', 'Задачи', 'Время', 'Бюджеты']); return; }
+    if (sub === 'doc_settings') { renderProfileStub('Документация: Настройки', 'Тема, дизайн интерфейса, уведомления.', ['Тема оформления', 'Дизайн', 'Уведомления']); return; }
     renderProfileOverview();
   }
 
@@ -2540,7 +2744,7 @@
       if (typeof window.__fillProfileContent === 'function') window.__fillProfileContent(sectionId || 'profile');
     };
     window.closeProfilePanel = closeProfilePanel;
-    try { window.dispatchEvent(new CustomEvent('profile-bridge-ready')); } catch (e) {}
+    try { window.dispatchEvent(new CustomEvent('profile-bridge-ready')); } catch (e) { }
   })();
 
   function bindProfileButton() {
@@ -2597,7 +2801,13 @@
 
   function ensureStageColor(stage, forcedColor) {
     if (!stage) {
-      return '#64748b';
+      return NO_STAGE_COLOR;
+    }
+    if (String(stage).trim().toLowerCase() === NO_STAGE.toLowerCase()) {
+      var c = forcedColor && /^#[0-9a-fA-F]{6}$/.test(forcedColor) ? forcedColor : NO_STAGE_COLOR;
+      SC[stage] = c;
+      STAB_C[stage] = c;
+      return c;
     }
     if (forcedColor && /^#[0-9a-fA-F]{6}$/.test(forcedColor)) {
       SC[stage] = forcedColor;
@@ -2635,6 +2845,7 @@
   window.getStageColorFromProject = getStageColorFromProject;
 
   function getVisibleStagesFromTasks() {
+    const configuredStages = getCurrentProjectStages();
     const presentStages = Array.from(
       new Set(
         tasks
@@ -2647,18 +2858,17 @@
       )
     );
 
-    const configuredStages = getCurrentProjectStages();
-    const ordered = configuredStages.filter(function (stage) {
-      return presentStages.includes(stage);
-    });
+    const stageSet = new Set(configuredStages.map(function (s) {
+      return s.toLowerCase();
+    }));
     const extras = presentStages
       .filter(function (stage) {
-        return !configuredStages.includes(stage);
+        return !stageSet.has(stage.toLowerCase());
       })
       .sort(function (a, b) {
         return a.localeCompare(b, 'ru');
       });
-    return ordered.concat(extras);
+    return configuredStages.concat(extras);
   }
 
   function syncColumnEmptyStates() {
@@ -2769,6 +2979,9 @@
       } else {
         head.appendChild(wrapper);
       }
+      if (typeof pkDropdownInit === 'function') {
+        pkDropdownInit(wrapper);
+      }
     });
   }
 
@@ -2834,32 +3047,36 @@
     const addButton = document.getElementById('ps-stage-add');
     list.innerHTML = '';
 
-    const safeInitial = Array.isArray(initialItems) && initialItems.length > 0
-      ? initialItems
-      : [{ name: '', budget: 0, color: '#4a9eff' }];
+    var baseInitial = Array.isArray(initialItems) && initialItems.length > 0 ? initialItems : [];
+    var hasNoStage = baseInitial.some(function (x) { return String(x.name || '').trim().toLowerCase() === NO_STAGE.toLowerCase(); });
+    var safeInitial = hasNoStage ? baseInitial : [{ name: NO_STAGE, budget: 0, color: NO_STAGE_COLOR }].concat(baseInitial);
+    var noStageFirst = safeInitial.filter(function (x) { return String(x.name || '').trim().toLowerCase() === NO_STAGE.toLowerCase(); });
+    var restStages = safeInitial.filter(function (x) { return String(x.name || '').trim().toLowerCase() !== NO_STAGE.toLowerCase(); });
+    safeInitial = (noStageFirst.length ? noStageFirst : [{ name: NO_STAGE, budget: 0, color: NO_STAGE_COLOR }]).concat(restStages);
 
     const createRow = function (item) {
+      const isNoStage = String(item.name || '').trim().toLowerCase() === NO_STAGE.toLowerCase();
       const row = document.createElement('div');
       row.className = 'ps-stage-row';
       row.dataset.originalStage = String(item.name || '').trim();
+      row.dataset.noStage = isNoStage ? '1' : '0';
       row.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 46px 40px;gap:8px;align-items:center;';
       row.innerHTML = ''
-        + '<input class="ps-input" data-field=\"stage-name\" placeholder=\"Этап\" value=\"' + String(item.name || '').replace(/\"/g, '&quot;') + '\">'
+        + '<input class="ps-input" data-field=\"stage-name\" placeholder=\"Этап\" value=\"' + String(item.name || '').replace(/\"/g, '&quot;') + '\"' + (isNoStage ? ' readonly' : '') + '>'
         + '<input class="ps-input" data-field=\"stage-budget\" type=\"number\" min=\"0\" placeholder=\"Сумма\" value=\"' + Number(item.budget || 0) + '\">'
-        + '<input data-field=\"stage-color\" type=\"color\" value=\"' + (item.color || '#4a9eff') + '\" style=\"height:40px;border:1px solid var(--bd);border-radius:10px;background:var(--sf2);padding:4px;\">'
-        + '<button type=\"button\" data-field=\"stage-remove\" class=\"ps-stage-remove\" title=\"Удалить этап\" aria-label=\"Удалить этап\">'
-        + '<svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" aria-hidden=\"true\">'
-        + '<path d=\"M3 6h18\"></path>'
-        + '<path d=\"M8 6V4h8v2\"></path>'
-        + '<path d=\"M19 6l-1 14H6L5 6\"></path>'
-        + '<path d=\"M10 11v6\"></path>'
-        + '<path d=\"M14 11v6\"></path>'
-        + '</svg>'
-        + '</button>';
+        + '<input data-field=\"stage-color\" type=\"color\" value=\"' + (item.color || (isNoStage ? NO_STAGE_COLOR : '#4a9eff')) + '\" style=\"height:40px;border:1px solid var(--bd);border-radius:10px;background:var(--sf2);padding:4px;\">'
+        + (isNoStage ? '<span data-field=\"stage-remove\" style=\"width:40px;visibility:hidden;\"></span>'
+          : '<button type=\"button\" data-field=\"stage-remove\" class=\"ps-stage-remove\" title=\"Удалить этап\" aria-label=\"Удалить этап\">'
+          + '<svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" aria-hidden=\"true\">'
+          + '<path d=\"M3 6h18\"></path><path d=\"M8 6V4h8v2\"></path>'
+          + '<path d=\"M19 6l-1 14H6L5 6\"></path><path d=\"M10 11v6\"></path><path d=\"M14 11v6\"></path>'
+          + '</svg></button>');
       const removeButton = row.querySelector('[data-field=\"stage-remove\"]');
-      removeButton.onclick = async function () {
-        await handleStageRemoveRequest(row, createRow);
-      };
+      if (removeButton && removeButton.tagName === 'BUTTON') {
+        removeButton.onclick = async function () {
+          await handleStageRemoveRequest(row, createRow);
+        };
+      }
       const budgetInput = row.querySelector('[data-field=\"stage-budget\"]');
       budgetInput.oninput = syncProjectBudgetInputFromStageRows;
       list.appendChild(row);
@@ -2888,10 +3105,11 @@
   function collectStageSettingsFromModal() {
     const list = document.getElementById('ps-stage-list');
     if (!list) {
-      return [];
+      return [{ name: NO_STAGE, budget: 0, color: NO_STAGE_COLOR }];
     }
     const rows = Array.from(list.querySelectorAll('.ps-stage-row'));
     const result = [];
+    var hasNoStage = false;
     rows.forEach(function (row) {
       const nameInput = row.querySelector('[data-field=\"stage-name\"]');
       const budgetInput = row.querySelector('[data-field=\"stage-budget\"]');
@@ -2900,6 +3118,7 @@
       if (!name) {
         return;
       }
+      if (name.toLowerCase() === NO_STAGE.toLowerCase()) hasNoStage = true;
       const budget = Math.max(0, Number((budgetInput && budgetInput.value) || 0));
       const color = String((colorInput && colorInput.value) || '').trim();
       if (!/^#[0-9a-fA-F]{6}$/.test(color)) {
@@ -2911,7 +3130,331 @@
         color: color.toLowerCase(),
       });
     });
+    if (!hasNoStage) {
+      result.unshift({ name: NO_STAGE, budget: 0, color: NO_STAGE_COLOR });
+    } else {
+      var noStageIdx = result.findIndex(function (r) { return r.name.toLowerCase() === NO_STAGE.toLowerCase(); });
+      if (noStageIdx > 0) {
+        var noStageItem = result.splice(noStageIdx, 1)[0];
+        result.unshift(noStageItem);
+      }
+    }
     return result;
+  }
+
+  function ensureAgentSettingsEditor(initialItems) {
+    const container = document.getElementById('ps-agent-settings');
+    if (!container) {
+      return;
+    }
+    const list = document.getElementById('ps-agent-list');
+    const addButton = document.getElementById('ps-agent-add');
+    if (!list || !addButton) {
+      return;
+    }
+    list.innerHTML = '';
+
+    const safeInitial = Array.isArray(initialItems) && initialItems.length > 0
+      ? initialItems
+      : [{ name: '', type: 'ai', color: '#6B7280' }];
+
+    const usedColors = function () {
+      return Array.from(list.querySelectorAll('[data-field=\"agent-color\"]'))
+        .map(function (input) {
+          return String(input.value || '').toLowerCase();
+        });
+    };
+
+    const NO_AGENT_LABEL = 'Без агента';
+    const createRow = function (item) {
+      const row = document.createElement('div');
+      row.className = 'ps-agent-row';
+      const isNoAgent = String(item.name || '').trim() === NO_AGENT_LABEL;
+      row.style.cssText = 'display:grid;grid-template-columns:1fr 120px 46px 40px;gap:8px;align-items:center;';
+      const typeVal = (item.type === 'ai' ? 'ai' : 'human');
+      row.innerHTML = ''
+        + '<input class="ps-input" data-field=\"agent-name\" placeholder=\"Имя агента\" value=\"' + escapeHtml(String(item.name || '')) + '\">'
+        + '<select class="ps-input status-sel" data-field=\"agent-type\">'
+        + '<option value=\"ai\"' + (typeVal === 'ai' ? ' selected' : '') + '>AI</option>'
+        + '<option value=\"human\"' + (typeVal === 'human' ? ' selected' : '') + '>Human</option>'
+        + '</select>'
+        + '<input data-field=\"agent-color\" type=\"color\" value=\"' + (item.color || '#6B7280') + '\" style=\"width:40px;height:40px;border:1px solid var(--bd);border-radius:10px;background:var(--sf2);padding:4px;\">'
+        + (isNoAgent ? '' : (
+          '<button type=\"button\" data-field=\"agent-remove\" class=\"ps-stage-remove\" title=\"Удалить агента\" aria-label=\"Удалить агента\">'
+          + '<svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" aria-hidden=\"true\">'
+          + '<path d=\"M3 6h18\"></path>'
+          + '<path d=\"M8 6V4h8v2\"></path>'
+          + '<path d=\"M19 6l-1 14H6L5 6\"></path>'
+          + '<path d=\"M10 11v6\"></path>'
+          + '<path d=\"M14 11v6\"></path>'
+          + '</svg>'
+          + '</button>'
+        ));
+      const removeBtn = row.querySelector('[data-field=\"agent-remove\"]');
+      if (removeBtn) {
+        removeBtn.onclick = function () {
+          handleAgentRemoveRequest(row, list, createRow, usedColors);
+        };
+      }
+      list.appendChild(row);
+    };
+
+    safeInitial.forEach(function (item) {
+      createRow(item);
+    });
+
+    addButton.onclick = function () {
+      const colors = usedColors();
+      createRow({
+        name: '',
+        type: 'ai',
+        color: nextStageColor(colors),
+      });
+      if (typeof pkDropdownInit === 'function') pkDropdownInit(document.getElementById('ps-agent-settings'));
+    };
+  }
+
+  async function handleAgentRemoveRequest(row, list, createRow, usedColors) {
+    const nameInput = row.querySelector('[data-field=\"agent-name\"]');
+    const agentName = String((nameInput && nameInput.value) || '').trim();
+    if (agentName === 'Без агента') {
+      showError('Агент «Без агента» нельзя удалить — он всегда доступен в каждом проекте.');
+      return;
+    }
+    if (!editingProjId || editingProjId === '__new__') {
+      row.remove();
+      return;
+    }
+    let tasksWithAgent = [];
+    if (editingProjId === activeProjId && typeof tasks !== 'undefined' && Array.isArray(tasks)) {
+      tasksWithAgent = tasks.filter(function (t) {
+        return String(t.agent || '').trim().toLowerCase() === agentName.toLowerCase();
+      });
+    } else {
+      try {
+        const res = await apiFetch('/projects/' + editingProjId + '/tasks');
+        const taskList = (res && res.tasks) ? res.tasks : [];
+        tasksWithAgent = taskList.filter(function (t) {
+          return String(t.agent || '').trim().toLowerCase() === agentName.toLowerCase();
+        });
+      } catch (e) {
+        showError('Не удалось проверить задачи: ' + (e.message || e));
+        return;
+      }
+    }
+    if (tasksWithAgent.length > 0) {
+      const otherAgents = collectAgentSettingsFromModal()
+        .filter(function (a) { return a.name && a.name.toLowerCase() !== agentName.toLowerCase(); })
+        .map(function (a) { return a.name; });
+      if (otherAgents.length === 0) {
+        showError('Нельзя удалить агента: нет других агентов для переназначения задач. Добавьте агента и переназначьте задачи.');
+        return;
+      }
+      const msg = 'Агент «' + agentName + '» назначен на ' + tasksWithAgent.length + ' задач. Выберите нового ответственного:';
+      const reassignTo = window.prompt(msg + '\n\nДоступны: ' + otherAgents.join(', '));
+      if (reassignTo == null) return;
+      const chosen = String(reassignTo || '').trim();
+      if (!chosen || otherAgents.indexOf(chosen) < 0) {
+        showError('Выберите агента из списка: ' + otherAgents.join(', '));
+        return;
+      }
+      if (!confirm('Переназначить ' + tasksWithAgent.length + ' задач на «' + chosen + '» и удалить агента «' + agentName + '»?')) {
+        return;
+      }
+      try {
+        for (var i = 0; i < tasksWithAgent.length; i++) {
+          var t = tasksWithAgent[i];
+          var taskId = t.id || t.raw_id;
+          if (taskId) {
+            await apiFetch('/tasks/' + taskId, {
+              method: 'PATCH',
+              body: { agent: chosen },
+            });
+          }
+        }
+        showInfo('Задачи переназначены на «' + chosen + '»');
+      } catch (e) {
+        showError('Ошибка переназначения: ' + (e.message || e));
+        return;
+      }
+    } else {
+      if (!confirm('Удалить агента «' + (agentName || 'без имени') + '»?')) {
+        return;
+      }
+    }
+    row.remove();
+  }
+
+  function collectAgentSettingsFromModal() {
+    const list = document.getElementById('ps-agent-list');
+    if (!list) {
+      return [];
+    }
+    const rows = Array.from(list.querySelectorAll('.ps-agent-row'));
+    const result = [];
+    rows.forEach(function (row) {
+      const nameInput = row.querySelector('[data-field=\"agent-name\"]');
+      const typeSelect = row.querySelector('[data-field=\"agent-type\"]');
+      const colorInput = row.querySelector('[data-field=\"agent-color\"]');
+      const name = String((nameInput && nameInput.value) || '').trim();
+      if (!name) {
+        return;
+      }
+      const type = (typeSelect && typeSelect.value === 'ai') ? 'ai' : 'human';
+      const color = String((colorInput && colorInput.value) || '').trim();
+      if (!color || !/^#[0-9a-fA-F]{6}$/.test(color)) {
+        return;
+      }
+      result.push({
+        name: name,
+        type: type,
+        color: color.toLowerCase(),
+      });
+    });
+    return result;
+  }
+
+  function ensurePriorityOptionsEditor(initialItems) {
+    const list = document.getElementById('ps-priority-list');
+    const addButton = document.getElementById('ps-priority-add');
+    if (!list || !addButton) return;
+    list.innerHTML = '';
+    const items = Array.isArray(initialItems) && initialItems.length > 0 ? initialItems : [{ value: 2, label: 'Medium' }];
+    function createRow(item) {
+      const row = document.createElement('div');
+      row.className = 'ps-stage-row';
+      row.style.cssText = 'display:grid;grid-template-columns:70px 1fr 48px 36px;gap:8px;align-items:center;';
+      const defColors = { 1: '#6B7280', 2: '#3B82F6', 3: '#F59E0B', 4: '#EF4444' };
+      const hex = (typeof item.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(item.color)) ? item.color : (defColors[item.value] || '#6B7280');
+      row.innerHTML = ''
+        + '<input class="ps-input" data-field="priority-value" type="number" min="0" placeholder="Число" value="' + escapeHtml(String(item.value ?? '')) + '">'
+        + '<input class="ps-input" data-field="priority-label" placeholder="Название (Low, High…)" value="' + escapeHtml(String(item.label ?? '')) + '">'
+        + '<input type="color" data-field="priority-color" value="' + escapeHtml(hex) + '" style="width:40px;height:40px;padding:4px;border:1px solid var(--bd);border-radius:10px;background:var(--sf2);cursor:pointer;">'
+        + '<button type="button" data-field="priority-remove" class="ps-stage-remove" title="Удалить">'
+        + '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>'
+        + '</button>';
+      const rm = row.querySelector('[data-field="priority-remove"]');
+      rm.onclick = function () { row.remove(); };
+      list.appendChild(row);
+    }
+    items.forEach(createRow);
+    addButton.onclick = function () {
+      const last = list.querySelector('.ps-stage-row:last-child');
+      const lastVal = last ? parseInt(last.querySelector('[data-field="priority-value"]')?.value, 10) : 0;
+      createRow({ value: (isNaN(lastVal) ? 0 : lastVal) + 1, label: '', color: '#6B7280' });
+    };
+  }
+
+  function ensureSizeOptionsEditor(initialItems) {
+    const list = document.getElementById('ps-size-list');
+    const addButton = document.getElementById('ps-size-add');
+    if (!list || !addButton) return;
+    list.innerHTML = '';
+    const items = Array.isArray(initialItems) && initialItems.length > 0 ? initialItems : [{ id: 'M', label: 'M' }];
+    function createRow(item) {
+      const row = document.createElement('div');
+      row.className = 'ps-stage-row';
+      row.style.cssText = 'display:grid;grid-template-columns:70px 1fr 48px 36px;gap:8px;align-items:center;';
+      const defColors = { XS: '#6B7280', S: '#3B82F6', M: '#10B981', L: '#F59E0B', XL: '#EF4444' };
+      const hex = (typeof item.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(item.color)) ? item.color : (defColors[String(item.id || 'M').toUpperCase()] || '#6B7280');
+      row.innerHTML = ''
+        + '<input class="ps-input" data-field="size-id" placeholder="XS,S,M,L,XL" value="' + escapeHtml(String(item.id ?? '')) + '">'
+        + '<input class="ps-input" data-field="size-label" placeholder="Подпись" value="' + escapeHtml(String(item.label ?? item.id ?? '')) + '">'
+        + '<input type="color" data-field="size-color" value="' + escapeHtml(hex) + '" style="width:40px;height:40px;padding:4px;border:1px solid var(--bd);border-radius:10px;background:var(--sf2);cursor:pointer;">'
+        + '<button type="button" data-field="size-remove" class="ps-stage-remove" title="Удалить">'
+        + '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>'
+        + '</button>';
+      const rm = row.querySelector('[data-field="size-remove"]');
+      rm.onclick = function () { row.remove(); };
+      list.appendChild(row);
+    }
+    items.forEach(createRow);
+    addButton.onclick = function () { createRow({ id: '', label: '', color: '#6B7280' }); };
+  }
+
+  function ensureColumnSettingsEditor(initialItems) {
+    const list = document.getElementById('ps-column-list');
+    if (!list) return;
+    list.innerHTML = '';
+    const defaults = [
+      { id: 'backlog', label: 'Backlog', visible: true, locked: true },
+      { id: 'todo', label: 'To Do', visible: true, locked: false },
+      { id: 'doing', label: 'In Progress', visible: true, locked: false },
+      { id: 'review', label: 'Review', visible: true, locked: false },
+      { id: 'done', label: 'Done', visible: true, locked: true },
+    ];
+    const items = Array.isArray(initialItems) && initialItems.length > 0 ? initialItems : defaults;
+    items.forEach(function (item) {
+      const row = document.createElement('div');
+      row.className = 'ps-stage-row';
+      row.dataset.colId = item.id || '';
+      row.style.cssText = 'display:grid;grid-template-columns:22px 1fr 70px;gap:6px;align-items:center;';
+      const locked = !!item.locked;
+      row.innerHTML = ''
+        + '<label style="display:flex;align-items:center;cursor:' + (locked ? 'not-allowed' : 'pointer') + '">'
+        + '<input type="checkbox" data-field="col-visible" ' + (item.visible !== false ? 'checked' : '') + (locked ? ' disabled' : '') + ' style="width:16px;height:16px;">'
+        + '</label>'
+        + '<input class="ps-input" data-field="col-label" placeholder="Название колонки" value="' + escapeHtml(String(item.label ?? '')) + '">'
+        + '<span style="font-size:10px;color:var(--tx3);">' + escapeHtml(item.id || '') + '</span>';
+      list.appendChild(row);
+    });
+  }
+
+  function collectPriorityOptionsFromModal() {
+    const list = document.getElementById('ps-priority-list');
+    if (!list) return [];
+    const rows = list.querySelectorAll('.ps-stage-row');
+    const result = [];
+    rows.forEach(function (row) {
+      const v = parseInt(row.querySelector('[data-field="priority-value"]')?.value, 10);
+      const label = String(row.querySelector('[data-field="priority-label"]')?.value || '').trim();
+      const colorEl = row.querySelector('[data-field="priority-color"]');
+      const color = colorEl && /^#[0-9a-fA-F]{6}$/.test(colorEl.value) ? colorEl.value : '#6B7280';
+      if (!label || isNaN(v) || v < 0) return;
+      result.push({ value: v, label: label, color: color });
+    });
+    return result.sort(function (a, b) { return a.value - b.value; });
+  }
+
+  function collectSizeOptionsFromModal() {
+    const list = document.getElementById('ps-size-list');
+    if (!list) return [];
+    const rows = list.querySelectorAll('.ps-stage-row');
+    const result = [];
+    rows.forEach(function (row) {
+      const id = String(row.querySelector('[data-field="size-id"]')?.value || '').trim().toUpperCase();
+      const label = String(row.querySelector('[data-field="size-label"]')?.value || id || '').trim();
+      const colorEl = row.querySelector('[data-field="size-color"]');
+      const color = colorEl && /^#[0-9a-fA-F]{6}$/.test(colorEl.value) ? colorEl.value : '#6B7280';
+      if (!id) return;
+      result.push({ id: id, label: label || id, color: color });
+    });
+    return result;
+  }
+
+  function collectColumnSettingsFromModal() {
+    const list = document.getElementById('ps-column-list');
+    if (!list) return [];
+    const rows = list.querySelectorAll('.ps-stage-row');
+    const result = [];
+    const order = ['backlog', 'todo', 'doing', 'review', 'done'];
+    rows.forEach(function (row) {
+      const id = String(row.dataset.colId || '').trim().toLowerCase();
+      if (!order.includes(id)) return;
+      const visible = row.querySelector('[data-field="col-visible"]');
+      const label = String(row.querySelector('[data-field="col-label"]')?.value || '').trim();
+      const locked = id === 'backlog' || id === 'done';
+      result.push({
+        id: id,
+        label: label || id,
+        visible: locked ? true : (visible && !visible.disabled ? visible.checked : true),
+        locked: locked,
+      });
+    });
+    return order.map(function (cid) {
+      const found = result.find(function (r) { return r.id === cid; });
+      return found || { id: cid, label: cid, visible: true, locked: cid === 'backlog' || cid === 'done' };
+    });
   }
 
   function syncProjectBudgetInputFromStageRows() {
@@ -3003,12 +3546,6 @@
           + '</div>'
           + '</div>';
         document.body.appendChild(overlay);
-        overlay.addEventListener('click', function (event) {
-          if (event.target === overlay) {
-            overlay.remove();
-            resolve(null);
-          }
-        });
       }
 
       overlay.classList.add('open');
@@ -3089,12 +3626,13 @@
   async function handleStageRemoveRequest(row, createRowFn) {
     const stageName = getRowStageName(row);
     const originalStageName = String(row.dataset.originalStage || '').trim();
-    const stageBudget = getRowStageBudget(row);
-    const rows = readCurrentStageRows();
-    if (rows.length <= 1) {
-      showError('В проекте должен остаться хотя бы один этап');
+    if (String(stageName || '').trim().toLowerCase() === NO_STAGE.toLowerCase() ||
+      String(originalStageName || '').trim().toLowerCase() === NO_STAGE.toLowerCase()) {
+      showError('Этап «' + NO_STAGE + '» нельзя удалить');
       return;
     }
+    const stageBudget = getRowStageBudget(row);
+    const rows = readCurrentStageRows();
 
     const stageCandidates = [];
     if (stageName) {
@@ -3328,6 +3866,62 @@
     };
   }
 
+  var NTM_AGENT_OPTIONS = [
+    'Без агента', 'Backend', 'Frontend', 'DevOps', 'QA', 'Design', 'Security',
+    'Integrations', 'Search', 'BOM', 'LLM', 'Analytics', 'Admin', 'PM'
+  ];
+
+  function getNtmAgentOptions() {
+    var agents = getCurrentProjectAgents().filter(function (a) { return a !== 'Без агента'; });
+    return ['Без агента'].concat(agents);
+  }
+
+  function ensureNtmHiddenOptions() {
+    var agentOpts = getNtmAgentOptions();
+    var agentSel = document.getElementById('ntm-agent');
+    if (agentSel) {
+      agentSel.innerHTML = '';
+      agentOpts.forEach(function (a) {
+        var opt = document.createElement('option');
+        opt.value = a;
+        opt.textContent = a;
+        agentSel.appendChild(opt);
+      });
+    }
+    var trackSel = document.getElementById('ntm-track');
+    if (trackSel) {
+      trackSel.innerHTML = '';
+      NTM_AGENT_OPTIONS.forEach(function (a) {
+        var opt = document.createElement('option');
+        opt.value = a;
+        opt.textContent = a;
+        trackSel.appendChild(opt);
+      });
+    }
+    var sizeSel = document.getElementById('ntm-size');
+    if (sizeSel) {
+      var sizeOpts = typeof getCurrentProjectSizeOptions === 'function' ? getCurrentProjectSizeOptions() : [{ id: 'XS', label: 'XS' }, { id: 'S', label: 'S' }, { id: 'M', label: 'M' }, { id: 'L', label: 'L' }, { id: 'XL', label: 'XL' }];
+      sizeSel.innerHTML = '';
+      sizeOpts.forEach(function (s) {
+        var opt = document.createElement('option');
+        opt.value = s.id || s;
+        opt.textContent = s.label || s.id || s;
+        sizeSel.appendChild(opt);
+      });
+    }
+    var prioSel = document.getElementById('ntm-priority');
+    if (prioSel) {
+      var prioOpts = typeof getCurrentProjectPriorityOptions === 'function' ? getCurrentProjectPriorityOptions() : [{ value: 1, label: 'Low' }, { value: 2, label: 'Medium' }, { value: 3, label: 'High' }, { value: 4, label: 'Critical' }];
+      prioSel.innerHTML = '';
+      prioOpts.forEach(function (p) {
+        var opt = document.createElement('option');
+        opt.value = String(p.value);
+        opt.textContent = p.label;
+        prioSel.appendChild(opt);
+      });
+    }
+  }
+
   function fillManualTaskStageOptions() {
     const stageSelect = document.getElementById('ntm-stage');
     if (!stageSelect) {
@@ -3349,6 +3943,8 @@
 
   function resetManualTaskForm() {
     const title = document.getElementById('ntm-title');
+    const taskCodeEl = document.getElementById('ntm-task-code');
+    const col = document.getElementById('ntm-col');
     const stage = document.getElementById('ntm-stage');
     const agent = document.getElementById('ntm-agent');
     const track = document.getElementById('ntm-track');
@@ -3356,82 +3952,26 @@
     const hours = document.getElementById('ntm-hours');
     const priority = document.getElementById('ntm-priority');
     const desc = document.getElementById('ntm-desc');
-    const notes = document.getElementById('ntm-notes');
-    if (!title || !stage || !agent || !track || !size || !hours || !priority || !desc || !notes) {
+    if (!title || !stage || !agent || !track || !size || !hours || !priority || !desc) {
       return;
     }
 
     title.value = '';
+    if (taskCodeEl) taskCodeEl.value = '';
+    if (col) col.value = 'backlog';
     stage.selectedIndex = 0;
-    agent.value = 'Без агента';
+    if (agent) agent.selectedIndex = 0;
     track.value = 'Backend';
     size.value = 'M';
     hours.value = '8';
     priority.value = '2';
     desc.value = '';
-    notes.value = '';
+    var depsEl = document.getElementById('ntm-deps');
+    if (depsEl) depsEl.value = '';
   }
 
   function setTaskCreateMode(mode) {
-    const isManual = mode === 'manual';
-    newTaskCreateMode = isManual ? 'manual' : 'ai';
-
-    let aiButton = document.getElementById('nt-mode-ai');
-    let manualButton = document.getElementById('nt-mode-manual');
-    let chat = document.getElementById('nt-chat');
-    let preview = document.getElementById('task-preview');
-    let inputRow = document.querySelector('#nt-ov .nt-input-row');
-    let manualWrap = document.getElementById('nt-manual-wrap');
-
-    if (!manualWrap && isManual) {
-      ensureManualTaskCreatorUI();
-      manualWrap = document.getElementById('nt-manual-wrap');
-      aiButton = document.getElementById('nt-mode-ai');
-      manualButton = document.getElementById('nt-mode-manual');
-      chat = document.getElementById('nt-chat');
-      preview = document.getElementById('task-preview');
-      inputRow = document.querySelector('#nt-ov .nt-input-row');
-    }
-
-    if (aiButton) {
-      aiButton.classList.toggle('active', !isManual);
-    }
-    if (manualButton) {
-      manualButton.classList.toggle('active', isManual);
-    }
-    if (chat) {
-      chat.style.display = isManual ? 'none' : '';
-    }
-    if (inputRow) {
-      inputRow.style.display = isManual ? 'none' : 'flex';
-    }
-    if (preview) {
-      if (isManual) {
-        preview.classList.remove('show');
-      }
-      preview.style.display = isManual ? 'none' : '';
-    }
-    if (manualWrap) {
-      manualWrap.style.display = isManual ? 'block' : 'none';
-    }
-
-    if (isManual) {
-      fillManualTaskStageOptions();
-      if (manualWrap) applyFieldColors(manualWrap);
-      setTimeout(function () {
-        const title = document.getElementById('ntm-title');
-        if (title) {
-          title.focus();
-        }
-      }, 0);
-    } else {
-      setTimeout(function () {
-        const input = document.getElementById('nt-ta');
-        if (input) {
-          input.focus();
-        }
-      }, 0);
-    }
+    newTaskCreateMode = mode === 'manual' ? 'manual' : 'ai';
   }
   window.setTaskCreateMode = setTaskCreateMode;
 
@@ -3461,9 +4001,9 @@
       !sizeInput ||
       !hoursInput ||
       !priorityInput ||
-      !descInput ||
-      !notesInput
+      !descInput
     ) {
+      showError('Не все поля формы найдены. Обновите страницу.');
       return;
     }
 
@@ -3472,6 +4012,17 @@
       titleInput.focus();
       return;
     }
+    var taskCodeInput = document.getElementById('ntm-task-code');
+    var taskCode = taskCodeInput ? String(taskCodeInput.value || '').trim().slice(0, 10) : '';
+    var depsInput = document.getElementById('ntm-deps');
+    var depsRaw = depsInput ? String(depsInput.value || '').trim() : '';
+    var depsBlocks = [];
+    if (depsRaw) {
+      depsRaw.split(/[\s,;]+/).forEach(function (s) {
+        var code = s.trim();
+        if (code) depsBlocks.push(code);
+      });
+    }
     var stageVal = String(stageInput.value || '').trim() || (getCurrentProjectStages()[0] || '');
     if (!stageVal) {
       showError('Укажите этап задачи');
@@ -3479,10 +4030,16 @@
       return;
     }
 
+    var colInput = document.getElementById('ntm-col');
+    var colVal = (colInput && colInput.value) ? String(colInput.value).trim() : 'backlog';
+
     submitButton.disabled = true;
     try {
       await createTaskFromPreview({
         title: title,
+        task_code: taskCode || null,
+        deps: depsBlocks.length ? { blocks: depsBlocks } : null,
+        col: colVal,
         stage: stageVal,
         agent: String(agentInput.value || 'Без агента').trim() || 'Без агента',
         track: String(trackInput.value || '').trim(),
@@ -3490,10 +4047,10 @@
         hours: Math.max(0, Number(hoursInput.value || 0)),
         priority: Math.max(1, Math.min(4, Number(priorityInput.value || 2))),
         desc: String(descInput.value || '').trim(),
-        notes: String(notesInput.value || '').trim(),
+        notes: (notesInput ? String(notesInput.value || '').trim() : ''),
       });
 
-      closeNewTask();
+      if (typeof window.closeTaskCreate === 'function') window.closeTaskCreate();
       await loadTasksForActiveProject();
       render();
       syncColumnEmptyStates();
@@ -3508,119 +4065,11 @@
       submitButton.disabled = false;
     }
   }
+  window.createManualTaskFromForm = createManualTaskFromForm;
 
   function ensureManualTaskCreatorUI() {
-    const modal = document.querySelector('#nt-ov .nt-modal');
-    const header = document.querySelector('#nt-ov .nt-hd');
-    if (!modal || !header) {
-      return;
-    }
-
-    if (!document.getElementById('nt-mode-switch')) {
-      const switcher = document.createElement('div');
-      switcher.className = 'nt-mode-switch';
-      switcher.id = 'nt-mode-switch';
-      switcher.innerHTML = ''
-        + '<button type="button" class="nt-mode-btn active" id="nt-mode-ai">AI</button>'
-        + '<button type="button" class="nt-mode-btn" id="nt-mode-manual">Вручную</button>';
-
-      const closeButton = header.querySelector('.tm-close');
-      if (closeButton) {
-        header.insertBefore(switcher, closeButton);
-      } else {
-        header.appendChild(switcher);
-      }
-    }
-
-    if (!document.getElementById('nt-manual-wrap')) {
-      const wrap = document.createElement('div');
-      wrap.className = 'nt-manual-wrap';
-      wrap.id = 'nt-manual-wrap';
-      wrap.innerHTML = ''
-        + '<div class="nt-manual-grid">'
-        + '<div class="nt-manual-field full">'
-        + '<div class="nt-manual-label">Название задачи</div>'
-        + '<input id="ntm-title" class="ps-input" placeholder="Что нужно сделать">'
-        + '</div>'
-        + '<div class="nt-manual-field"><div class="nt-manual-label">Этап</div><select id="ntm-stage" class="ps-input"></select></div>'
-        + '<div class="nt-manual-field ntm-agent-wrap"><div class="nt-manual-label">Агент</div><select id="ntm-agent" class="ps-input">'
-        + '<option value="Без агента">Без агента</option>'
-        + '<option value="Backend" selected>Backend</option>'
-        + '<option value="Frontend">Frontend</option>'
-        + '<option value="DevOps">DevOps</option>'
-        + '<option value="QA">QA</option>'
-        + '<option value="Design">Design</option>'
-        + '<option value="Security">Security</option>'
-        + '<option value="Integrations">Integrations</option>'
-        + '<option value="Search">Search</option>'
-        + '<option value="BOM">BOM</option>'
-        + '<option value="LLM">LLM</option>'
-        + '<option value="Analytics">Analytics</option>'
-        + '<option value="Admin">Admin</option>'
-        + '<option value="PM">PM</option>'
-        + '</select></div>'
-        + '<div class="nt-manual-field"><div class="nt-manual-label">Трек</div><select id="ntm-track" class="ps-input">'
-        + '<option value="Backend" selected>Backend</option>'
-        + '<option value="Frontend">Frontend</option>'
-        + '<option value="QA">QA</option>'
-        + '<option value="DevOps">DevOps</option>'
-        + '<option value="Design">Design</option>'
-        + '<option value="Analytics">Analytics</option>'
-        + '<option value="Security">Security</option>'
-        + '<option value="Integrations">Integrations</option>'
-        + '<option value="Product">Product</option>'
-        + '</select></div>'
-        + '<div class="nt-manual-field"><div class="nt-manual-label">Размер</div><select id="ntm-size" class="ps-input">'
-        + '<option value="XS">XS</option><option value="S">S</option><option value="M" selected>M</option><option value="L">L</option><option value="XL">XL</option>'
-        + '</select></div>'
-        + '<div class="nt-manual-field"><div class="nt-manual-label">Часы</div><input id="ntm-hours" type="number" min="0" step="1" value="8" class="ps-input"></div>'
-        + '<div class="nt-manual-field"><div class="nt-manual-label">Приоритет</div><select id="ntm-priority" class="ps-input">'
-        + '<option value="1">Low</option><option value="2" selected>Medium</option><option value="3">High</option><option value="4">Critical</option>'
-        + '</select></div>'
-        + '<div class="nt-manual-field full"><div class="nt-manual-label">Описание</div><textarea id="ntm-desc" class="imp-textarea" style="height:120px;" placeholder="Описание задачи"></textarea></div>'
-        + '<div class="nt-manual-field full"><div class="nt-manual-label">Заметки</div><textarea id="ntm-notes" class="imp-textarea" style="height:90px;" placeholder="Дополнительно"></textarea></div>'
-        + '</div>'
-        + '<div class="nt-manual-actions">'
-        + '<button type="button" class="btn-revise" id="ntm-cancel">Отмена</button>'
-        + '<button type="button" class="btn-confirm" id="ntm-create">Создать задачу</button>'
-        + '</div>';
-      modal.appendChild(wrap);
-    }
-
-    var createWrap = document.getElementById('nt-manual-wrap');
-    if (createWrap) {
-      applyFieldColors(createWrap);
-      ['ntm-stage', 'ntm-agent', 'ntm-size', 'ntm-priority'].forEach(function (id) {
-        var el = document.getElementById(id);
-        if (el) el.addEventListener('change', function () { applyFieldColors(createWrap); });
-      });
-    }
-
-    const aiButton = document.getElementById('nt-mode-ai');
-    const manualButton = document.getElementById('nt-mode-manual');
-    const cancelButton = document.getElementById('ntm-cancel');
-    const createButton = document.getElementById('ntm-create');
-
-    if (aiButton) {
-      aiButton.onclick = function () {
-        setTaskCreateMode('ai');
-      };
-    }
-    if (manualButton) {
-      manualButton.onclick = function () {
-        setTaskCreateMode('manual');
-      };
-    }
-    if (cancelButton) {
-      cancelButton.onclick = function () {
-        setTaskCreateMode('ai');
-      };
-    }
-    if (createButton) {
-      createButton.onclick = function () {
-        createManualTaskFromForm();
-      };
-    }
+    // manual creation form removed; keep as no-op
+    return;
   }
 
   function isProjectCompleted() {
@@ -3650,7 +4099,7 @@
     location.replace('/login.html');
     // Возвращаем промис, который никогда не резолвится,
     // чтобы остановить дальнейшее выполнение до редиректа
-    return new Promise(function () {});
+    return new Promise(function () { });
   }
 
   async function apiFetch(path, options) {
@@ -3667,18 +4116,22 @@
       body = JSON.stringify(body);
     }
 
-    const response = await fetch(path, {
+    const fetchOpts = {
       method: method,
       headers: headers,
       body: body,
-    });
+    };
+    if (params.signal) {
+      fetchOpts.signal = params.signal;
+    }
+    const response = await fetch(path, fetchOpts);
 
     if (response.status === 401) {
       authToken = '';
       localStorage.removeItem('pk24_token');
       localStorage.removeItem('pk24_email');
       location.replace('/login.html');
-      return new Promise(function () {});
+      return new Promise(function () { });
     }
 
     if (!response.ok) {
@@ -3705,28 +4158,77 @@
   }
 
   function mapProjectFromApi(project) {
-    const stageSettings = Array.isArray(project.stage_settings)
+    let stageSettings = Array.isArray(project.stage_settings)
       ? project.stage_settings
-          .filter(function (item) {
-            return item && typeof item.name === 'string' && item.name.trim() !== '';
-          })
-          .map(function (item) {
-            return {
-              name: item.name.trim(),
-              budget: Number(item.budget || 0),
-              color:
-                typeof item.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(item.color)
-                  ? item.color
-                  : null,
-            };
-          })
+        .filter(function (item) {
+          return item && typeof item.name === 'string' && item.name.trim() !== '';
+        })
+        .map(function (item) {
+          return {
+            name: item.name.trim(),
+            budget: Number(item.budget || 0),
+            color:
+              typeof item.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(item.color)
+                ? item.color
+                : null,
+          };
+        })
       : [];
+    var noStageLower = NO_STAGE.toLowerCase();
+    var hasNoStage = stageSettings.some(function (s) { return s.name.toLowerCase() === noStageLower; });
+    if (!hasNoStage) {
+      stageSettings = [{ name: NO_STAGE, budget: 0, color: NO_STAGE_COLOR }].concat(stageSettings);
+    } else {
+      var noStageItem = stageSettings.find(function (s) { return s.name.toLowerCase() === noStageLower; });
+      var rest = stageSettings.filter(function (s) { return s.name.toLowerCase() !== noStageLower; });
+      stageSettings = [noStageItem].concat(rest);
+    }
     stageSettings.forEach(function (stage) {
       if (stage.color) {
         ensureStageColor(stage.name, stage.color);
       }
     });
 
+    const agentSettings = Array.isArray(project.agent_settings)
+      ? project.agent_settings
+        .filter(function (item) {
+          return item && typeof item.name === 'string' && item.name.trim() !== '';
+        })
+        .map(function (item) {
+          return {
+            name: item.name.trim(),
+            type: (item.type === 'ai' ? 'ai' : 'human'),
+            color:
+              typeof item.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(item.color)
+                ? item.color
+                : '#6B7280',
+          };
+        })
+      : [];
+
+    const defPrioColors = { 1: '#6B7280', 2: '#3B82F6', 3: '#F59E0B', 4: '#EF4444' };
+    const defSizeColors = { XS: '#6B7280', S: '#3B82F6', M: '#10B981', L: '#F59E0B', XL: '#EF4444' };
+    const rawPrio = Array.isArray(project.priority_options) && project.priority_options.length > 0 ? project.priority_options : [{ value: 1, label: 'Low' }, { value: 2, label: 'Medium' }, { value: 3, label: 'High' }, { value: 4, label: 'Critical' }];
+    const priorityOptions = rawPrio.map(function (item) {
+      const v = Number(item.value);
+      const c = typeof item.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(item.color) ? item.color : (defPrioColors[v] || '#6B7280');
+      return { value: v, label: item.label || '', color: c };
+    });
+    const rawSize = Array.isArray(project.size_options) && project.size_options.length > 0 ? project.size_options : [{ id: 'XS', label: 'XS' }, { id: 'S', label: 'S' }, { id: 'M', label: 'M' }, { id: 'L', label: 'L' }, { id: 'XL', label: 'XL' }];
+    const sizeOptions = rawSize.map(function (item) {
+      const k = String(item.id || '').toUpperCase();
+      const c = typeof item.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(item.color) ? item.color : (defSizeColors[k] || '#6B7280');
+      return { id: k, label: item.label || k, color: c };
+    });
+    const columnSettings = Array.isArray(project.column_settings) && project.column_settings.length > 0
+      ? project.column_settings
+      : [
+          { id: 'backlog', label: 'Backlog', visible: true, locked: true },
+          { id: 'todo', label: 'To Do', visible: true, locked: false },
+          { id: 'doing', label: 'In Progress', visible: true, locked: false },
+          { id: 'review', label: 'Review', visible: true, locked: false },
+          { id: 'done', label: 'Done', visible: true, locked: true },
+        ];
     return {
       id: project.id,
       name: project.name,
@@ -3734,13 +4236,18 @@
       budget: Number(project.budget_total || 0),
       stages: stageSettings.length > 0
         ? stageSettings.map(function (item) {
-            return item.name;
-          })
+          return item.name;
+        })
         : Array.isArray(project.stages) && project.stages.length > 0
-        ? project.stages.slice()
-        : [],
+          ? project.stages.slice()
+          : [],
       stageSettings: stageSettings,
+      agentSettings: agentSettings,
+      priorityOptions: priorityOptions,
+      sizeOptions: sizeOptions,
+      columnSettings: columnSettings,
       responsible_user_id: project.responsible_user_id || null,
+      historyRetentionMonths: project.history_retention_months != null ? Number(project.history_retention_months) : null,
     };
   }
 
@@ -3753,7 +4260,8 @@
   }
 
   function mapTaskFromApi(task) {
-    const stage = (task.stage || '').trim() || '';
+    var stage = (task.stage || '').trim() || '';
+    if (!stage) stage = NO_STAGE;
     if (stage) ensureStageColor(stage);
     const publicIdNumber = Number(task.public_id || 0);
     const displayId =
@@ -3780,10 +4288,15 @@
       priority = map[key] != null ? map[key] : 0;
     }
     if (!Number.isFinite(priority)) priority = 0;
+    var depsVal = task.deps;
+    if (!depsVal || typeof depsVal !== 'object' || !Array.isArray(depsVal.blocks)) {
+      depsVal = { blocks: [] };
+    }
     return {
       id: displayId,
       raw_id: task.id,
       public_id: publicIdNumber > 0 ? publicIdNumber : null,
+      task_code: (task.task_code && String(task.task_code).trim()) || '',
       title: task.title || 'Untitled',
       col: normalizeUiCol(task.col),
       position: Number.isFinite(Number(task.position)) ? Number(task.position) : 0,
@@ -3794,7 +4307,7 @@
       hours: hours,
       desc: task.descript || task.description || '',
       notes: task.notes || '',
-      deps: task.deps || '',
+      deps: depsVal,
       priority: priority,
     };
   }
@@ -3814,20 +4327,121 @@
 
   function getCurrentProjectStages() {
     const currentProject = getActiveProject();
+    var stages = [];
     if (
       currentProject &&
       Array.isArray(currentProject.stageSettings) &&
       currentProject.stageSettings.length > 0
     ) {
-      return currentProject.stageSettings.map(function (item) {
+      stages = currentProject.stageSettings.map(function (item) {
+        return item.name;
+      });
+    } else if (currentProject && Array.isArray(currentProject.stages) && currentProject.stages.length > 0) {
+      stages = currentProject.stages.slice();
+    }
+    if (stages.length === 0 || stages[0] !== NO_STAGE) {
+      var rest = stages.filter(function (s) { return String(s || '').trim().toLowerCase() !== NO_STAGE.toLowerCase(); });
+      stages = [NO_STAGE].concat(rest);
+    }
+    return stages;
+  }
+
+  function getCurrentProjectAgents() {
+    const currentProject = getActiveProject();
+    if (
+      currentProject &&
+      Array.isArray(currentProject.agentSettings) &&
+      currentProject.agentSettings.length > 0
+    ) {
+      return currentProject.agentSettings.map(function (item) {
         return item.name;
       });
     }
-    if (currentProject && Array.isArray(currentProject.stages) && currentProject.stages.length > 0) {
-      return currentProject.stages.slice();
-    }
     return [];
   }
+
+  function getAgentColorFromProject(agentName) {
+    const currentProject = getActiveProject();
+    if (
+      currentProject &&
+      Array.isArray(currentProject.agentSettings) &&
+      currentProject.agentSettings.length > 0
+    ) {
+      const a = currentProject.agentSettings.find(function (item) {
+        return item.name && String(item.name).toLowerCase() === String(agentName || '').toLowerCase();
+      });
+      if (a && a.color) return a.color;
+    }
+    return null;
+  }
+  window.getAgentColorFromProject = getAgentColorFromProject;
+
+  function getProjectColumns() {
+    const p = getActiveProject();
+    const defaults = [
+      { id: 'backlog', label: 'Backlog' },
+      { id: 'todo', label: 'To Do' },
+      { id: 'inprogress', label: 'In Progress' },
+      { id: 'review', label: 'Review' },
+      { id: 'done', label: 'Done' },
+    ];
+    if (!p || !Array.isArray(p.columnSettings) || p.columnSettings.length === 0) {
+      return defaults;
+    }
+    const uiColMap = { doing: 'inprogress' };
+    return p.columnSettings
+      .filter(function (c) { return c && c.visible !== false; })
+      .map(function (c) {
+        const apiId = c.id;
+        const uiId = uiColMap[apiId] || apiId;
+        return { id: uiId, label: (c.label && c.label.trim()) || c.id || uiId };
+      });
+  }
+  window.getProjectColumns = getProjectColumns;
+
+  function getCurrentProjectPriorityOptions() {
+    const p = getActiveProject();
+    if (p && Array.isArray(p.priorityOptions) && p.priorityOptions.length > 0) {
+      return p.priorityOptions;
+    }
+    return [{ value: 1, label: 'Low', color: '#6B7280' }, { value: 2, label: 'Medium', color: '#3B82F6' }, { value: 3, label: 'High', color: '#F59E0B' }, { value: 4, label: 'Critical', color: '#EF4444' }];
+  }
+
+  function getCurrentProjectSizeOptions() {
+    const p = getActiveProject();
+    if (p && Array.isArray(p.sizeOptions) && p.sizeOptions.length > 0) {
+      return p.sizeOptions;
+    }
+    return [{ id: 'XS', label: 'XS', color: '#6B7280' }, { id: 'S', label: 'S', color: '#3B82F6' }, { id: 'M', label: 'M', color: '#10B981' }, { id: 'L', label: 'L', color: '#F59E0B' }, { id: 'XL', label: 'XL', color: '#EF4444' }];
+  }
+
+  function getPriorityColorFromProject(value) {
+    const opts = getCurrentProjectPriorityOptions();
+    const opt = opts.find(function (o) { return Number(o.value) === Number(value); });
+    return (opt && opt.color) || '';
+  }
+  window.getPriorityColorFromProject = getPriorityColorFromProject;
+
+  function getSizeColorFromProject(sizeId) {
+    const opts = getCurrentProjectSizeOptions();
+    const opt = opts.find(function (o) { return String(o.id || '').toUpperCase() === String(sizeId || '').toUpperCase(); });
+    return (opt && opt.color) || '';
+  }
+  window.getSizeColorFromProject = getSizeColorFromProject;
+
+  function getPriorityLabelFromProject(value) {
+    const opts = getCurrentProjectPriorityOptions();
+    const opt = opts.find(function (o) { return Number(o.value) === Number(value); });
+    return (opt && opt.label) || '';
+  }
+  window.getPriorityLabelFromProject = getPriorityLabelFromProject;
+
+  function getSizeLabelFromProject(sizeId) {
+    const opts = getCurrentProjectSizeOptions();
+    const opt = opts.find(function (o) { return String(o.id || '').toUpperCase() === String(sizeId || '').toUpperCase(); });
+    return (opt && opt.label) || '';
+  }
+  window.getSizeLabelFromProject = getSizeLabelFromProject;
 
   function getTimerDisplayState() {
     const nowMs = Date.now();
@@ -3997,6 +4611,8 @@
     { id: 'tm-f-agent', getColor: 'getAgentColor' },
     { id: 'tm-f-priority', getColor: 'getPriorityColor' },
     { id: 'tm-f-size', getColor: 'getSizeColor' },
+    // поля формы создания задачи (ручной режим)
+    { id: 'ntm-col', getColor: 'getStatusColor' },
     { id: 'ntm-stage', getColor: 'getStageColorFromProject' },
     { id: 'ntm-agent', getColor: 'getAgentColor' },
     { id: 'ntm-size', getColor: 'getSizeColor' },
@@ -4007,7 +4623,23 @@
     if (!selectEl || selectEl.tagName !== 'SELECT' || typeof colorFn !== 'function') return;
     function apply() {
       var value = selectEl.value;
-      selectEl.style.color = colorFn(value) || '';
+      var color = colorFn(value) || '';
+      selectEl.style.color = color;
+      // если селект обёрнут в pk-dropdown, красим капсулу и опции
+      var pkWrapper = selectEl.closest ? selectEl.closest('.pk-dropdown') : null;
+      if (pkWrapper) {
+        // текст выбранного значения
+        var labelSpan = pkWrapper.querySelector('.pk-dropdown-label');
+        if (labelSpan) {
+          labelSpan.style.color = color;
+        }
+        // отдельные пункты меню — по их value
+        var items = pkWrapper.querySelectorAll('.pk-dropdown-option');
+        items.forEach(function (item) {
+          var v = item.getAttribute('data-value') || item.textContent.trim();
+          item.style.color = colorFn(v) || '';
+        });
+      }
       var opts = selectEl.options;
       for (var i = 0; i < opts.length; i++) {
         opts[i].style.color = colorFn(opts[i].value) || '';
@@ -4097,15 +4729,15 @@
       + '.msg-action-btn:disabled{opacity:.6;cursor:not-allowed;}'
       + '.msg-actions.applied{opacity:.5;pointer-events:none;}'
       + '.bridge-col-sort{display:flex;align-items:center;margin-left:auto;margin-right:8px;}'
-      + '.bridge-col-sort select{min-width:160px;text-align:left;vertical-align:middle;}'
+      + '.bridge-col-sort select{min-width:200px;text-align:left;vertical-align:middle;}'
       + '.nt-mode-switch{display:flex;align-items:stretch;margin-left:auto;margin-right:8px;background:var(--sf2);border:1px solid var(--bd2);border-radius:10px;overflow:hidden;}'
       + '.nt-mode-btn{height:34px;padding:0 16px;border:none;background:transparent;color:var(--tx3);font-family:Syne,sans-serif;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;}'
       + '.nt-mode-btn:hover{color:var(--tx2);}'
       + '.nt-mode-btn.active{background:var(--gold);color:#000;}'
-      + '.nt-manual-wrap{display:none;padding:16px 20px;overflow:auto;flex:1;min-height:260px;}'
-      + '.nt-manual-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}'
-      + '.nt-manual-field{display:flex;flex-direction:column;gap:6px;}'
-      + '.nt-manual-field.full{grid-column:1/-1;}'
+      + '.nt-manual-wrap{display:none;padding:16px 20px;overflow:auto;flex:1;min-height:260px;overflow-x:visible;overflow-y:auto;}'
+      + '.nt-manual-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}'
+      + '.nt-manual-field{display:flex;flex-direction:column;gap:6px;background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:10px 12px;}'
+      + '.nt-manual-field.full,.nt-manual-field.mc-full{grid-column:1/-1;}'
       + '.nt-manual-label{font-size:10px;color:var(--tx3);text-transform:uppercase;letter-spacing:1px;font-family:DM Mono,monospace;}'
       + '.nt-manual-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--bd);}'
       + '.ps-stage-add-btn{'
@@ -4171,6 +4803,15 @@
       + '.profile-llm-help-list li{margin-bottom:6px;}'
       + '.profile-llm-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}'
       + '.profile-llm-card{padding:14px;background:var(--sf);border:1px solid var(--bd2);border-radius:12px;display:flex;flex-direction:column;gap:10px;}'
+      + '.profile-llm-keys-card{padding:14px;background:var(--sf);border:1px solid var(--bd2);border-radius:12px;margin-bottom:12px;}'
+      + '.profile-llm-keys-card[data-has-key="1"]{background:rgba(74,222,128,.06);border-color:rgba(74,222,128,.3);box-shadow:0 0 0 1px rgba(74,222,128,.08);}'
+      + '[data-theme="light"] .profile-llm-keys-card[data-has-key="1"]{background:rgba(34,197,94,.08);border-color:rgba(34,197,94,.25);}'
+      + '.profile-llm-keys-card-title{font-family:Syne,sans-serif;font-size:14px;font-weight:700;color:var(--tx);margin-bottom:10px;}'
+      + '.profile-btn-capsule{padding:8px 20px;border-radius:999px;font-size:12px;font-weight:600;font-family:Syne,sans-serif;cursor:pointer;border:1px solid;transition:all .15s;}'
+      + '.profile-llm-keys-save.profile-btn-capsule{background:rgba(74,222,128,.15);border-color:rgba(74,222,128,.45);color:var(--green);}'
+      + '.profile-llm-keys-save.profile-btn-capsule:hover{background:rgba(74,222,128,.28);border-color:var(--green);}'
+      + '.profile-btn-danger.profile-btn-capsule,.profile-llm-keys-delete.profile-btn-capsule{background:rgba(248,113,113,.12);border-color:rgba(248,113,113,.45);color:var(--red);}'
+      + '.profile-btn-danger.profile-btn-capsule:hover,.profile-llm-keys-delete.profile-btn-capsule:hover{background:rgba(248,113,113,.25);border-color:var(--red);}'
       + '.profile-llm-card-title{font-family:Syne,sans-serif;font-size:14px;font-weight:700;color:var(--tx);}'
       + '.profile-llm-card-desc{font-size:11px;color:var(--tx3);line-height:1.45;}'
       + '.profile-llm-card-select-wrap{display:flex;flex-direction:column;gap:6px;}'
@@ -4185,6 +4826,9 @@
       + '.profile-llm-verify-status{font-size:12px;margin-bottom:10px;}'
       + '.profile-llm-verify-status.ok{color:var(--green);}'
       + '.profile-llm-verify-status.error{color:var(--red);}'
+      + '.profile-llm-keys-status-fixed{min-height:24px;margin-top:8px;font-size:12px;line-height:1.4;color:inherit;}'
+      + '.profile-llm-keys-status-fixed.ok{color:var(--green);}'
+      + '.profile-llm-keys-status-fixed.error{color:var(--red);}'
       + '.profile-llm-main-wrap{display:flex;flex-direction:column;gap:16px;}'
       + '.profile-llm-main-wrap.profile-llm-main-dimmed .profile-llm-main{opacity:0.55;pointer-events:none;}'
       + '.profile-llm-main{padding:16px;background:var(--sf);border:1px solid var(--bd2);border-radius:12px;transition:opacity .2s;}'
@@ -4221,7 +4865,28 @@
       + '.profile-role-row{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--sf);border:1px solid var(--bd2);border-radius:10px;}'
       + '.profile-role-name{font-size:13px;color:var(--tx);font-family:Syne,sans-serif;}'
       + '.profile-role-meta{font-size:11px;color:var(--tx2);}'
+      + '.profile-proj-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;}'
+      + '.profile-proj-card{position:relative;padding:18px;background:var(--sf);border:1px solid var(--bd2);border-radius:12px;display:flex;flex-direction:column;gap:12px;}'
+      + '.profile-proj-card[data-active="1"]{border-color:rgba(240,165,0,.4);background:var(--gold-dim);}'
+      + '.profile-proj-head{display:flex;flex-direction:column;gap:4px;}'
+      + '.profile-proj-name{font-family:Syne,sans-serif;font-size:18px;font-weight:700;color:var(--tx);}'
+      + '.profile-proj-status{font-size:11px;color:var(--tx3);text-transform:uppercase;letter-spacing:0.5px;}'
+      + '.profile-proj-card[data-active="1"] .profile-proj-status{color:var(--gold);}'
+      + '.profile-proj-body{display:flex;flex-direction:column;gap:10px;}'
+      + '.profile-proj-field{display:flex;flex-direction:column;gap:4px;}'
+      + '.profile-proj-lbl{font-size:10px;color:var(--tx3);text-transform:uppercase;letter-spacing:0.5px;}'
+      + '.profile-proj-val{font-size:12px;color:var(--tx2);}'
+      + '.profile-proj-sel{min-width:140px;max-width:220px;height:29px;padding:0 10px;border-radius:999px;background:var(--sf2);border:1px solid var(--bd2);color:var(--tx);font-size:12px;}'
+      + '[data-theme="dark"] .profile-proj-sel{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14);}'
+      + '[data-theme="light"] .profile-proj-sel{background:rgba(255,255,255,.96);border-color:rgba(0,0,0,.12);}'
+      + '.profile-proj-meta{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:11px;color:var(--tx3);}'
+      + '.profile-proj-settings-btn{position:absolute;top:14px;right:14px;width:32px;height:32px;border-radius:8px;background:var(--sf2);border:1px solid var(--bd2);color:var(--tx2);font-size:14px;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;}'
+      + '.profile-proj-settings-btn:hover{background:var(--sf3);border-color:var(--bd3);color:var(--gold);}'
+      + '.profile-proj-card .pk-dropdown,.profile-proj-card .pk-dropdown-trigger{min-height:29px;height:29px;border-radius:999px;}'
+      + '#ps-ov .pk-dropdown,#ps-ov .pk-dropdown-trigger{min-height:32px;height:32px;border-radius:999px;}'
       + '.profile-inline-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}'
+      + '.profile-radio-label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--tx);}'
+      + '.profile-radio-label input{flex-shrink:0;}'
       + '.profile-inline-hint{font-size:11px;color:var(--tx3);line-height:1.5;}'
       + '.profile-btn{height:36px;padding:0 14px;border-radius:9px;background:rgba(74,222,128,.15);border:1.5px solid rgba(74,222,128,.45);'
       + 'color:var(--green);font-family:Syne,sans-serif;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;}'
@@ -4235,6 +4900,26 @@
       + '.profile-input{height:38px;width:100%;padding:0 12px;background:var(--sf2);border:1px solid var(--bd2);border-radius:10px;'
       + 'color:var(--tx);font-family:DM Mono,monospace;font-size:12px;outline:none;}'
       + '.profile-input:focus{border-color:var(--gold);}'
+      + '.profile-history-settings-row{display:flex;align-items:center;gap:16px;margin-bottom:12px;flex-wrap:wrap;}'
+      + '.profile-history-settings-row .profile-field-label{font-size:10px;color:var(--tx3);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;}'
+      + '.profile-history-settings-row select{min-width:160px;}'
+      + '.profile-history-settings-row .pk-dropdown{min-width:160px;}'
+      + '.profile-history-settings-row .pk-dropdown-trigger{min-height:38px;height:38px;border-radius:10px;background:var(--sf2);border:1px solid var(--bd2);color:var(--tx);}'
+      + '.profile-history-settings-row .pk-dropdown-trigger:hover{background:var(--sf3);border-color:var(--bd3);}'
+      + '.profile-history-settings-row .pk-dropdown.open .pk-dropdown-trigger{border-color:var(--gold);}'
+      + '.profile-history-settings-row .pk-dropdown-menu{background:var(--mbg);border:1px solid var(--bd2);min-width:max(100%,160px);}'
+      + '.profile-history-settings-row .pk-dropdown-option:hover{background:var(--sf2);}'
+      + '.profile-history-settings-row .pk-dropdown-option.is-selected{background:var(--gold-dim);color:var(--gold);}'
+      + '.hist-period-field{display:flex;flex-direction:column;gap:4px;}'
+      + '.hist-retention-warn{font-size:11px;color:var(--tx3);line-height:1.5;flex:1;min-width:200px;margin-top:25px;}'
+      + '.hist-retention-warn strong{color:var(--red);}'
+      + '.hist-type-dropdown-wrap{position:relative;}'
+      + '.hist-type-toggle{min-width:140px;text-align:left;cursor:pointer;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:0 10px;height:28px;font-size:11px;}'
+      + '.hist-type-dropdown{display:none;position:absolute;top:100%;left:0;margin-top:4px;background:var(--mbg);border:1px solid var(--bd2);border-radius:10px;box-shadow:var(--sh-lg);padding:8px;min-width:160px;z-index:100;}'
+      + '.hist-type-dropdown.open{display:block;}'
+      + '.hist-type-cb{display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:11px;color:var(--tx2);cursor:pointer;border-radius:6px;}'
+      + '.hist-type-cb:hover{background:var(--sf2);}'
+      + '.hist-type-cb input{flex-shrink:0;}'
       + '.pf-search-row{position:relative;margin-bottom:8px;}'
       + '.pf-search-row input{width:100%;height:38px;padding:0 36px 0 12px;box-sizing:border-box;}'
       + '.pf-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--tx3);font-size:16px;cursor:pointer;padding:2px 4px;line-height:1;}'
@@ -4269,6 +4954,16 @@
       + '.trash-action-purge:hover{background:rgba(248,113,113,.2);color:#f87171;}'
       + '.trash-stage{display:inline-flex;align-items:center;justify-content:center;padding:2px 8px;border-radius:999px;border:1px solid var(--bd2);'
       + 'color:var(--stage-color);font-size:10px;font-weight:700;}'
+      + '[data-design=\"v2\"] .profile-cards{gap:12px;}'
+      + '[data-design=\"v2\"] .profile-card{background:var(--bg-card);border:1px solid var(--bd);border-radius:16px;}'
+      + '[data-design=\"v2\"] .profile-empty{border-radius:16px;background:var(--bg-card);border-color:var(--bd);color:var(--tx-muted);}'
+      + '[data-design=\"v2\"] .profile-btn{border-radius:999px;}'
+      + '[data-design=\"v2\"] .profile-btn.ghost{background:var(--bg-card);border-color:var(--bd);color:var(--tx2);}'
+      + '[data-design=\"v2\"] .profile-btn.danger{background:var(--red-soft);border-color:rgba(220,38,38,.5);color:var(--red);}'
+      + '[data-design=\"v2\"] .profile-input{background:var(--bg-card);border-radius:12px;border:1px solid var(--bd);}'
+      + '[data-design=\"v2\"] .profile-input:focus{border-color:var(--bd-focus);box-shadow:0 0 0 3px var(--accent-soft);}'
+      + '[data-design=\"v2\"] .profile-role-row{background:var(--bg-card);border-radius:14px;border:1px solid var(--bd);}'
+      + '[data-design=\"v2\"] .profile-llm-usage-card{background:var(--bg-card);border:1px solid var(--bd);border-radius:16px;}'
       + '.profile-modal-wide{width:760px;max-width:94vw;}'
       + '.profile-restore-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-top:10px;}'
       + '.profile-field{display:flex;flex-direction:column;gap:6px;}'
@@ -4300,21 +4995,28 @@
       + '}'
       + '.tm-title-edit{'
       + 'font-family:Syne,sans-serif;font-size:18px;font-weight:700;line-height:1.4;'
-      + 'color:var(--tx);background:transparent;border:none;outline:none;width:100%;'
-      + 'border-bottom:1.5px solid var(--bd2);padding-bottom:2px;'
-      + 'transition:border-color .15s;box-sizing:border-box;'
+      + 'color:var(--tx);background:transparent;border:none !important;outline:none;width:100%;'
+      + 'transition:border-color .15s;box-sizing:border-box;padding:0;'
       + '}'
-      + '.tm-title-edit:focus{border-bottom-color:var(--gold);}'
+      + '.tm-title-edit:focus{outline:none;}'
       + '.tm-desc-edit{'
-      + 'width:100%;min-height:90px;background:var(--sf2);border:1px solid var(--bd);'
+      + 'width:100%;min-height:68px;background:var(--sf2);border:1px solid var(--bd);'
       + 'border-radius:10px;color:var(--tx2);font-family:DM Mono,monospace;font-size:13px;'
       + 'line-height:1.8;padding:10px 12px;outline:none;resize:vertical;'
       + 'transition:border-color .15s;box-sizing:border-box;'
       + '}'
       + '.tm-desc-edit:focus{border-color:var(--gold);}'
-      + '#tm-save-btn{background:rgba(74,222,128,.15);border-color:rgba(74,222,128,.45);color:var(--green);}'
-      + '#tm-save-btn:hover{background:rgba(74,222,128,.28);border-color:var(--green);}'
-      + '#tm-save-btn:disabled{opacity:.4;cursor:not-allowed;}'
+      + '#task-create-ov #ntm-desc{min-height:154px;}'
+      + '.tm-desc-edit-single{'
+      + 'width:100%;height:40px;min-height:0;background:var(--sf2);border:1px solid var(--bd);'
+      + 'border-radius:10px;color:var(--tx2);font-family:DM Mono,monospace;font-size:13px;'
+      + 'padding:0 12px;outline:none;transition:border-color .15s;box-sizing:border-box;'
+      + '}'
+      + '.tm-desc-edit-single:focus{border-color:var(--gold);}'
+      + '.tm-desc-edit-single::placeholder{color:var(--tx3);}'
+      + '#task-ov #tm-save-btn{background:rgba(74,222,128,.2);border:1px solid rgba(74,222,128,.5);color:var(--green);}'
+      + '#task-ov #tm-save-btn:hover{background:rgba(74,222,128,.35);border-color:var(--green);}'
+      + '#task-ov #tm-save-btn:disabled{opacity:.4;cursor:not-allowed;}'
       + '.tm-field-input{'
       + 'width:100%;background:transparent;border:none;'
       + 'border-bottom:1px solid var(--bd2);'
@@ -4344,11 +5046,6 @@
         + '</div>'
         + '</div>';
       document.body.appendChild(overlay);
-      overlay.addEventListener('click', function (event) {
-        if (event.target === overlay) {
-          overlay.classList.remove('open');
-        }
-      });
       const noBtn = document.getElementById('resume-project-no');
       const yesBtn = document.getElementById('resume-project-yes');
       if (noBtn) {
@@ -4402,7 +5099,7 @@
       overlay.innerHTML = ''
         + '<div class="bridge-confirm-card">'
         + '<div class="bridge-confirm-title">Удалить проект?</div>'
-        + '<div class="bridge-confirm-sub">Проект и все его задачи будут удалены безвозвратно.</div>'
+        + '<div class="bridge-confirm-sub">Проект, все его задачи и вся история действий (аудит) будут удалены безвозвратно.</div>'
         + '<div class="bridge-delete-hint">Для подтверждения введите точное название проекта:</div>'
         + '<div class="bridge-delete-name" id="delete-project-name-ref"></div>'
         + '<input id="delete-project-name-input" class="bridge-delete-input" placeholder="Введите название проекта">'
@@ -4412,11 +5109,6 @@
         + '</div>'
         + '</div>';
       document.body.appendChild(overlay);
-      overlay.addEventListener('click', function (event) {
-        if (event.target === overlay) {
-          overlay.remove();
-        }
-      });
     }
 
     overlay.classList.add('open');
@@ -4471,7 +5163,7 @@
         applyTimerFromSnapshot();
         showInfo(
           'Проект удален. Задач удалено: ' +
-            Number((response && response.deleted_tasks) || 0)
+          Number((response && response.deleted_tasks) || 0)
         );
       } catch (error) {
         yesButton.disabled = false;
@@ -4534,18 +5226,41 @@
     var task = tasks.find(function (item) { return item.id === taskId; });
     if (!task) { return; }
 
-    // ── Title ──────────────────────────────────────────────────────────────
+    // ── Task code (ID задачи) в tm-id-col ───────────────────────────────────
+    var idCol = document.querySelector('#task-ov .tm-id-col');
+    var taskCodeEl = document.getElementById('tm-task-code');
+    if (idCol && !taskCodeEl) {
+      var codeInp = document.createElement('input');
+      codeInp.id = 'tm-task-code';
+      codeInp.className = 'tm-title-edit tm-id-input';
+      codeInp.placeholder = 'ID';
+      codeInp.maxLength = 10;
+      codeInp.value = task.task_code || '';
+      idCol.innerHTML = '';
+      idCol.appendChild(codeInp);
+    } else if (taskCodeEl) {
+      taskCodeEl.value = task.task_code || '';
+    }
+
+    // ── Title в tm-title-col ──────────────────────────────────────────────
+    var titleCol = document.querySelector('#task-ov .tm-title-col');
     var titleEl = document.getElementById('tm-title');
-    if (titleEl) {
-      if (titleEl.tagName === 'INPUT') {
-        titleEl.value = task.title;
-      } else {
-        var titleInput = document.createElement('input');
+    if (titleCol) {
+      var titleInput = document.getElementById('tm-title');
+      if (!titleInput || titleInput.tagName !== 'INPUT') {
+        titleInput = document.createElement('input');
         titleInput.id = 'tm-title';
         titleInput.className = 'tm-title-edit';
         titleInput.value = task.title;
         titleInput.placeholder = 'Название задачи';
-        titleEl.replaceWith(titleInput);
+        if (titleEl && titleEl.parentNode) {
+          titleEl.replaceWith(titleInput);
+        } else {
+          titleCol.innerHTML = '';
+          titleCol.appendChild(titleInput);
+        }
+      } else {
+        titleInput.value = task.title;
       }
     }
 
@@ -4568,47 +5283,57 @@
     var metaEl = document.getElementById('tm-meta');
     if (metaEl) {
       var stages = getCurrentProjectStages();
+      var taskStage = (task.stage || '').trim();
+      if (!taskStage) taskStage = NO_STAGE;
+      if (taskStage && !stages.some(function (s) { return String(s || '').trim().toLowerCase() === taskStage.toLowerCase(); })) {
+        stages = [taskStage].concat(stages);
+      }
       var stageOpts = stages.map(function (s) {
-        return '<option value="' + s + '"' + (task.stage === s ? ' selected' : '') + '>' + s + '</option>';
+        var match = taskStage && String(s || '').trim().toLowerCase() === taskStage.toLowerCase();
+        return '<option value="' + escapeHtml(s) + '"' + (match ? ' selected' : '') + '>' + escapeHtml(s) + '</option>';
       }).join('');
 
-      var COL_OPTIONS = [
-        { id: 'backlog',    label: 'Backlog' },
-        { id: 'todo',       label: 'To Do' },
-        { id: 'inprogress', label: 'In Progress' },
-        { id: 'review',     label: 'Review' },
-        { id: 'done',       label: 'Done' },
-      ];
-      var colOpts = COL_OPTIONS.map(function (c) {
-        return '<option value="' + c.id + '"' + (task.col === c.id ? ' selected' : '') + '>' + c.label + '</option>';
+      var colList = typeof getProjectColumns === 'function' ? getProjectColumns() : [{ id: 'backlog', label: 'Backlog' }, { id: 'todo', label: 'To Do' }, { id: 'inprogress', label: 'In Progress' }, { id: 'review', label: 'Review' }, { id: 'done', label: 'Done' }];
+      var colOpts = colList.map(function (c) {
+        return '<option value="' + c.id + '"' + (task.col === c.id ? ' selected' : '') + '>' + escapeHtml(c.label) + '</option>';
       }).join('');
 
-      var PRIORITY_OPTIONS = [
-        { val: 1, label: 'Low' },
-        { val: 2, label: 'Medium' },
-        { val: 3, label: 'High' },
-        { val: 4, label: 'Critical' },
-      ];
-      var prioVal = task.priority > 0 ? task.priority : 1;
-      var prioOpts = PRIORITY_OPTIONS.map(function (p) {
-        return '<option value="' + p.val + '"' + (prioVal === p.val ? ' selected' : '') + '>' + p.label + '</option>';
+      var prioList = typeof getCurrentProjectPriorityOptions === 'function' ? getCurrentProjectPriorityOptions() : [{ value: 1, label: 'Low' }, { value: 2, label: 'Medium' }, { value: 3, label: 'High' }, { value: 4, label: 'Critical' }];
+      var prioVal = task.priority > 0 ? task.priority : (prioList[0] && prioList[0].value) || 1;
+      var prioOpts = prioList.map(function (p) {
+        var v = p.value;
+        return '<option value="' + v + '"' + (prioVal === v ? ' selected' : '') + '>' + escapeHtml(p.label) + '</option>';
       }).join('');
+      if (prioList.length > 0 && !prioList.some(function (p) { return p.value === prioVal; })) {
+        prioOpts = '<option value="' + prioVal + '" selected>' + escapeHtml(String(prioVal)) + '</option>' + prioOpts;
+      }
 
-      var AGENT_OPTIONS = ['Без агента', 'Backend', 'Frontend', 'DevOps', 'QA', 'Design', 'Security', 'Integrations', 'Search', 'BOM', 'LLM', 'Analytics', 'Admin', 'PM'];
-      var curAgent = (task.agent && AGENT_OPTIONS.indexOf(task.agent) >= 0) ? task.agent : 'Backend';
+      var AGENT_OPTIONS = getNtmAgentOptions();
+      var curAgent = task.agent && AGENT_OPTIONS.indexOf(task.agent) >= 0 ? task.agent : 'Без агента';
       var agentOpts = AGENT_OPTIONS.map(function (a) {
         return '<option value="' + escapeHtml(a) + '"' + (curAgent === a ? ' selected' : '') + '>' + escapeHtml(a) + '</option>';
       }).join('');
 
-      var SIZES = ['XS', 'S', 'M', 'L', 'XL'];
-      var curSize = task.size || 'M';
-      var sizeOpts = SIZES.map(function (s) {
-        return '<option value="' + s + '"' + (curSize === s ? ' selected' : '') + '>' + s + '</option>';
+      var sizeList = typeof getCurrentProjectSizeOptions === 'function' ? getCurrentProjectSizeOptions() : [{ id: 'XS', label: 'XS' }, { id: 'S', label: 'S' }, { id: 'M', label: 'M' }, { id: 'L', label: 'L' }, { id: 'XL', label: 'XL' }];
+      var curSize = String(task.size || 'M').toUpperCase();
+      var sizeOpts = sizeList.map(function (s) {
+        var sid = s.id || s;
+        return '<option value="' + escapeHtml(sid) + '"' + (curSize === sid ? ' selected' : '') + '>' + escapeHtml(s.label || sid) + '</option>';
       }).join('');
+      if (sizeList.length > 0 && !sizeList.some(function (s) { return (s.id || s) === curSize; }) && curSize) {
+        sizeOpts = '<option value="' + escapeHtml(curSize) + '" selected>' + escapeHtml(curSize) + '</option>' + sizeOpts;
+      }
 
-      var curDeps = (task.deps && typeof task.deps === 'object')
-        ? JSON.stringify(task.deps)
-        : String(task.deps || '');
+      var curDeps = '';
+      if (task.deps && typeof task.deps === 'object' && Array.isArray(task.deps.blocks) && task.deps.blocks.length) {
+        curDeps = task.deps.blocks.map(function (blockId) {
+          if (typeof blockId !== 'string') return '';
+          var other = tasks.find(function (item) {
+            return item.raw_id === blockId || item.id === blockId;
+          });
+          return other && other.task_code ? other.task_code : blockId;
+        }).filter(Boolean).join(', ');
+      }
 
       function mkMc(id, label, controlHtml) {
         return '<div class="mc"><div class="mc-lbl">' + label + '</div>' + controlHtml + '</div>';
@@ -4622,19 +5347,19 @@
       }
 
       metaEl.innerHTML =
-        mkMc('tm-f-col',      'Статус',     mkSel('tm-f-col', colOpts))
-        + mkMc('tm-f-stage',  'Этап',       mkSel('tm-f-stage', stageOpts))
-        + mkMc('tm-f-agent',  'Агент',      mkSel('tm-f-agent', agentOpts))
-        + mkMc('tm-f-priority','Приоритет', mkSel('tm-f-priority', prioOpts))
-        + mkMc('tm-f-size',   'Размер',     mkSel('tm-f-size', sizeOpts))
-        + mkMc('tm-f-hours',  'Часы',       mkInp('tm-f-hours', 'number', task.hours || 0, ' min="0" step="0.5"'))
-        + '<div class="mc mc-full"><div class="mc-lbl">Зависимости</div>'
-        + mkInp('tm-f-deps', 'text', curDeps, ' placeholder="UUID, UUID..."')
-        + '</div>';
+        mkMc('tm-f-col', 'Статус', mkSel('tm-f-col', colOpts))
+        + mkMc('tm-f-stage', 'Этап', mkSel('tm-f-stage', stageOpts))
+        + mkMc('tm-f-priority', 'Приоритет', mkSel('tm-f-priority', prioOpts))
+        + mkMc('tm-f-agent', 'Агент', mkSel('tm-f-agent', agentOpts))
+        + mkMc('tm-f-size', 'Размер', mkSel('tm-f-size', sizeOpts))
+        + mkMc('tm-f-hours', 'Часы', mkInp('tm-f-hours', 'number', task.hours || 0, ' min="0" step="0.5"'));
+
+      var depsInput = document.getElementById('tm-f-deps');
+      if (depsInput) depsInput.value = curDeps;
 
       // Size ↔ Hours auto-sync
       var SIZE_HOURS = { XS: 2, S: 4, M: 12, L: 32, XL: 60 };
-      var sizeEl2  = document.getElementById('tm-f-size');
+      var sizeEl2 = document.getElementById('tm-f-size');
       var hoursEl2 = document.getElementById('tm-f-hours');
       if (sizeEl2 && hoursEl2) {
         sizeEl2.addEventListener('change', function () {
@@ -4650,28 +5375,14 @@
       });
     }
 
-    // ── Save button ────────────────────────────────────────────────────────
+    // ── Save button (в теле модала под Описание) ────────────────────────────
     var saveBtn = document.getElementById('tm-save-btn');
-    if (!saveBtn) {
-      saveBtn = document.createElement('button');
-      saveBtn.id = 'tm-save-btn';
-      saveBtn.className = 'tm-close';
-      saveBtn.title = 'Сохранить изменения';
-      saveBtn.textContent = '✓';
-      var header = document.querySelector('#task-ov .tm-hd');
-      var deleteBtn = document.getElementById('tm-delete-btn');
-      var closeBtn = header && header.querySelector('.tm-close:not(#tm-save-btn):not(.tm-delete)');
-      if (deleteBtn) {
-        header.insertBefore(saveBtn, deleteBtn);
-      } else if (closeBtn) {
-        header.insertBefore(saveBtn, closeBtn);
-      } else if (header) {
-        header.appendChild(saveBtn);
-      }
+    if (saveBtn) {
+      saveBtn.style.display = '';
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Сохранить';
+      saveBtn.onclick = function () { saveTaskEdits(taskId); };
     }
-    saveBtn.disabled = false;
-    saveBtn.textContent = '✓';
-    saveBtn.onclick = function () { saveTaskEdits(taskId); };
   }
 
   async function saveTaskEdits(taskId) {
@@ -4681,37 +5392,38 @@
       return;
     }
 
-    var titleEl    = document.getElementById('tm-title');
-    var descEl     = document.getElementById('tm-desc');
-    var colEl      = document.getElementById('tm-f-col');
-    var stageEl    = document.getElementById('tm-f-stage');
-    var agentEl    = document.getElementById('tm-f-agent');
+    var titleEl = document.getElementById('tm-title');
+    var taskCodeEl = document.getElementById('tm-task-code');
+    var descEl = document.getElementById('tm-desc');
+    var colEl = document.getElementById('tm-f-col');
+    var stageEl = document.getElementById('tm-f-stage');
+    var agentEl = document.getElementById('tm-f-agent');
     var priorityEl = document.getElementById('tm-f-priority');
-    var sizeEl     = document.getElementById('tm-f-size');
-    var hoursEl    = document.getElementById('tm-f-hours');
-    var depsEl     = document.getElementById('tm-f-deps');
+    var sizeEl = document.getElementById('tm-f-size');
+    var hoursEl = document.getElementById('tm-f-hours');
+    var depsEl = document.getElementById('tm-f-deps');
 
-    var newTitle    = titleEl && titleEl.tagName === 'INPUT'    ? titleEl.value.trim()           : task.title;
-    var newDesc     = descEl  && descEl.tagName === 'TEXTAREA'  ? descEl.value.trim()            : (task.desc || '');
-    var newCol      = colEl      ? colEl.value                  : task.col;
-    var newStage    = stageEl    ? stageEl.value                : task.stage;
-    var newAgent    = agentEl    ? agentEl.value.trim()         : (task.agent || '');
-    var newPriority = priorityEl ? Number(priorityEl.value)     : (task.priority || 1);
-    var newSize     = sizeEl     ? sizeEl.value                 : (task.size || 'M');
-    var newHours    = hoursEl    ? (parseFloat(hoursEl.value) || 0) : (task.hours || 0);
-    var depsRaw     = depsEl     ? depsEl.value.trim()          : String(task.deps || '');
+    var newTitle = titleEl && titleEl.tagName === 'INPUT' ? titleEl.value.trim() : task.title;
+    var newTaskCode = taskCodeEl ? String(taskCodeEl.value || '').trim().slice(0, 10) : (task.task_code || '');
+    var newDesc = descEl && descEl.tagName === 'TEXTAREA' ? descEl.value.trim() : (task.desc || '');
+    var newCol = colEl ? colEl.value : task.col;
+    var newStage = stageEl ? stageEl.value : task.stage;
+    var newAgent = agentEl ? agentEl.value.trim() : (task.agent || '');
+    var newPriority = priorityEl ? Number(priorityEl.value) : (task.priority || 1);
+    var newSize = sizeEl ? sizeEl.value : (task.size || 'M');
+    var newHours = hoursEl ? (parseFloat(hoursEl.value) || 0) : (task.hours || 0);
+    var depsRaw = depsEl ? depsEl.value.trim() : '';
 
     if (!newTitle) {
       showError('Название задачи не может быть пустым');
       return;
     }
 
-    // Parse deps: JSON object/array or keep as string
-    var newDeps;
-    if (!depsRaw) {
-      newDeps = null;
-    } else {
-      try { newDeps = JSON.parse(depsRaw); } catch (_) { newDeps = depsRaw; }
+    // Parse deps: comma-separated codes (or UUIDs) -> { blocks: [...] }
+    var newDeps = null;
+    if (depsRaw) {
+      var blocks = depsRaw.split(/[\s,;]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+      if (blocks.length) newDeps = { blocks: blocks };
     }
 
     var saveBtn = document.getElementById('tm-save-btn');
@@ -4721,27 +5433,29 @@
       await apiFetch('/tasks/' + task.raw_id, {
         method: 'PATCH',
         body: {
-          title:    newTitle,
-          col:      normalizeApiCol(newCol),
-          stage:    newStage  || null,
-          agent:    newAgent  || null,
+          title: newTitle,
+          task_code: newTaskCode || null,
+          col: normalizeApiCol(newCol),
+          stage: newStage || null,
+          agent: newAgent || null,
           priority: newPriority,
-          hours:    newHours,
-          descript: newDesc   || null,
-          deps:     newDeps,
+          hours: newHours,
+          descript: newDesc || null,
+          deps: newDeps,
         },
       });
 
       // Update local task object
-      task.title    = newTitle;
-      task.desc     = newDesc;
-      task.col      = newCol;
-      task.stage    = newStage;
-      task.agent    = newAgent || 'Tech Lead';
+      task.title = newTitle;
+      task.task_code = newTaskCode;
+      task.desc = newDesc;
+      task.col = newCol;
+      task.stage = newStage;
+      task.agent = newAgent || 'Tech Lead';
       task.priority = newPriority;
-      task.hours    = newHours;
-      task.size     = newSize;
-      task.deps     = depsRaw;
+      task.hours = newHours;
+      task.size = newSize;
+      task.deps = newDeps || { blocks: [] };
 
       render();
       syncColumnEmptyStates();
@@ -4780,11 +5494,6 @@
         + '</div>'
         + '</div>';
       document.body.appendChild(overlay);
-      overlay.addEventListener('click', function (event) {
-        if (event.target === overlay) {
-          overlay.remove();
-        }
-      });
     }
 
     overlay.classList.add('open');
@@ -4970,12 +5679,14 @@
     stageBar.insertBefore(allButton, searchWrap);
 
     const visibleStages = getVisibleStagesFromTasks();
-    if (curStage !== 'all' && !visibleStages.includes(curStage)) {
+    if (curStage !== 'all' && !visibleStages.some(function (s) { return String(s || '').toLowerCase() === String(curStage || '').toLowerCase(); })) {
       curStage = 'all';
     }
     visibleStages.forEach(function (stage) {
       const count = tasks.filter(function (task) {
-        return task.stage === stage;
+        var tStage = (task.stage || '').trim();
+        if (!tStage) tStage = NO_STAGE;
+        return String(stage || '').toLowerCase() === tStage.toLowerCase();
       }).length;
       const stageColor = ensureStageColor(stage);
       const button = document.createElement('button');
@@ -4997,7 +5708,9 @@
 
     if (curStage !== 'all') {
       filtered = filtered.filter(function (task) {
-        return task.stage === curStage;
+        var tStage = (task.stage || '').trim();
+        if (!tStage) tStage = NO_STAGE;
+        return String(curStage || '').toLowerCase() === tStage.toLowerCase();
       });
     }
 
@@ -5007,6 +5720,7 @@
           task.id || '',
           task.raw_id || '',
           task.public_id != null ? String(task.public_id) : '',
+          task.task_code || '',
           task.title || '',
           task.desc || '',
           task.notes || '',
@@ -5020,7 +5734,8 @@
     }
 
     const ordered = [];
-    COLS.forEach(function (column) {
+    const colsForOrder = typeof getProjectColumns === 'function' ? getProjectColumns() : [{ id: 'backlog', label: 'Backlog' }, { id: 'todo', label: 'To Do' }, { id: 'inprogress', label: 'In Progress' }, { id: 'review', label: 'Review' }, { id: 'done', label: 'Done' }];
+    colsForOrder.forEach(function (column) {
       const inColumn = filtered.filter(function (task) {
         return task.col === column.id;
       });
@@ -5071,13 +5786,33 @@
     const task = tasks.find(function (item) {
       return item.id === taskId || item.raw_id === taskId;
     });
+    if (task && (apiCol === 'doing' || apiCol === 'todo') && task.deps && Array.isArray(task.deps.blocks) && task.deps.blocks.length) {
+      var notDone = task.deps.blocks.filter(function (blockId) {
+        var dep = tasks.find(function (t) { return t.raw_id === blockId || t.id === blockId; });
+        return !dep || dep.col !== 'done';
+      });
+      if (notDone.length) {
+        var codes = notDone.map(function (id) {
+          var t = tasks.find(function (x) { return x.raw_id === id || x.id === id; });
+          return t && t.task_code ? t.task_code : id;
+        }).join(', ');
+        throw new Error('Сначала завершите зависимости: ' + codes);
+      }
+    }
     const rawId = task && task.raw_id ? task.raw_id : taskId;
-    await apiFetch('/tasks/' + rawId + '/move', {
-      method: 'POST',
-      body: {
-        col: apiCol,
-      },
-    });
+    try {
+      await apiFetch('/tasks/' + rawId + '/move', {
+        method: 'POST',
+        body: {
+          col: apiCol,
+        },
+      });
+    } catch (err) {
+      if (err.body && err.body.error === 'task_blocked_by_deps' && err.body.message) {
+        throw new Error(err.body.message);
+      }
+      throw err;
+    }
   }
 
   function getColumnTaskOrderRawIds(uiCol) {
@@ -5163,8 +5898,9 @@
     const sizeVal = (previewTask.size && String(previewTask.size).trim().toUpperCase()) || '';
     const payload = {
       title: previewTask.title,
+      task_code: (previewTask.task_code && String(previewTask.task_code).trim().slice(0, 10)) || null,
       stage: (previewTask.stage && String(previewTask.stage).trim()) || (getCurrentProjectStages()[0] || ''),
-      col: normalizeApiCol(newTaskCol || 'backlog'),
+      col: normalizeApiCol(previewTask.col || newTaskCol || 'backlog'),
       track: previewTask.track || null,
       agent: previewTask.agent || null,
       priority: Number(previewTask.priority || 0),
@@ -5172,7 +5908,7 @@
       size: sizeVal && ['XS', 'S', 'M', 'L', 'XL'].includes(sizeVal) ? sizeVal : null,
       descript: previewTask.desc || null,
       notes: previewTask.notes || null,
-      deps: null,
+      deps: previewTask.deps && previewTask.deps.blocks && previewTask.deps.blocks.length ? previewTask.deps : null,
     };
 
     await apiFetch('/projects/' + activeProjId + '/tasks', {
@@ -5211,6 +5947,7 @@
 
       applyProjectSettings();
       render();
+      ensureBulkBarBindings();
       syncColumnEmptyStates();
       updateStageTabs();
       renderProjList();
@@ -5264,6 +6001,152 @@
   getFiltered = getFilteredTasks;
   renderStageTabs = renderProjectStageTabs;
 
+  window.selectedTaskIds = window.selectedTaskIds || new Set();
+  window.toggleTaskSelection = function (rawId) {
+    if (!rawId) return;
+    var set = window.selectedTaskIds;
+    if (set.has(rawId)) {
+      set.delete(rawId);
+    } else {
+      set.add(rawId);
+    }
+    if (typeof updateBulkBarVisibility === 'function') updateBulkBarVisibility();
+    if (typeof render === 'function') render();
+  };
+  window.selectColumnTasks = function (colId) {
+    var filtered = typeof getFilteredTasks === 'function' ? getFilteredTasks() : [];
+    var inCol = filtered.filter(function (t) { return t.col === colId; });
+    inCol.forEach(function (t) {
+      var id = t.raw_id || t.id;
+      if (id) window.selectedTaskIds.add(id);
+    });
+    if (typeof updateBulkBarVisibility === 'function') updateBulkBarVisibility();
+    if (typeof render === 'function') render();
+  };
+  window.clearSelection = function () {
+    window.selectedTaskIds.clear();
+    if (typeof updateBulkBarVisibility === 'function') updateBulkBarVisibility();
+    if (typeof render === 'function') render();
+  };
+  function updateBulkBarVisibility() {
+    var bar = document.getElementById('bulk-actions-bar');
+    var countEl = document.getElementById('bulk-count');
+    var boardOuter = document.querySelector('.board-outer');
+    var n = window.selectedTaskIds ? window.selectedTaskIds.size : 0;
+    if (bar) bar.style.display = n > 0 ? '' : 'none';
+    if (countEl) countEl.textContent = n;
+    if (boardOuter) boardOuter.style.height = n > 0 ? 'calc(100vh - 192px)' : '';
+    if (n > 0) {
+      setupBulkBarOptions();
+      if (typeof pkDropdownInit === 'function') pkDropdownInit(bar);
+    }
+  }
+
+  function setupBulkBarOptions() {
+    var cols = typeof getProjectColumns === 'function' ? getProjectColumns() : [
+      { id: 'backlog', label: 'Backlog' }, { id: 'todo', label: 'To Do' },
+      { id: 'inprogress', label: 'In Progress' }, { id: 'review', label: 'Review' }, { id: 'done', label: 'Done' }
+    ];
+    var colSel = document.getElementById('bulk-col');
+    if (colSel) {
+      colSel.innerHTML = '<option value="">— Статус —</option>' + cols.map(function (c) {
+        return '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(c.label) + '</option>';
+      }).join('');
+    }
+    var stages = typeof getCurrentProjectStages === 'function' ? getCurrentProjectStages() : [];
+    var stageSel = document.getElementById('bulk-stage');
+    if (stageSel) {
+      stageSel.innerHTML = '<option value="">— Этап —</option>' + stages.map(function (s) {
+        return '<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + '</option>';
+      }).join('');
+    }
+    var prioSel = document.getElementById('bulk-priority');
+    if (prioSel) {
+      var prioOpts = typeof getCurrentProjectPriorityOptions === 'function' ? getCurrentProjectPriorityOptions() : [{ value: 1, label: 'Low' }, { value: 2, label: 'Medium' }, { value: 3, label: 'High' }, { value: 4, label: 'Critical' }];
+      prioSel.innerHTML = '<option value="">— Приоритет —</option>' + prioOpts.map(function (p) { return '<option value="' + escapeHtml(String(p.value)) + '">' + escapeHtml(p.label) + '</option>'; }).join('');
+    }
+    var agents = typeof getNtmAgentOptions === 'function' ? getNtmAgentOptions() : [];
+    var agentSel = document.getElementById('bulk-agent');
+    if (agentSel) {
+      agentSel.innerHTML = '<option value="">— Агент —</option>' + agents.map(function (a) {
+        return '<option value="' + escapeHtml(a) + '">' + escapeHtml(a) + '</option>';
+      }).join('');
+    }
+    var sizeSel = document.getElementById('bulk-size');
+    if (sizeSel) {
+      var sizeOptsBulk = typeof getCurrentProjectSizeOptions === 'function' ? getCurrentProjectSizeOptions() : [{ id: 'XS', label: 'XS' }, { id: 'S', label: 'S' }, { id: 'M', label: 'M' }, { id: 'L', label: 'L' }, { id: 'XL', label: 'XL' }];
+      sizeSel.innerHTML = '<option value="">— Размер —</option>' + sizeOptsBulk.map(function (s) { return '<option value="' + escapeHtml(s.id) + '">' + escapeHtml(s.label || s.id) + '</option>'; }).join('');
+    }
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    var tag = (e.target && e.target.tagName) ? e.target.tagName.toUpperCase() : '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (e.target.closest && (e.target.closest('#bulk-actions-bar') || e.target.closest('.pk-dropdown.open'))) return;
+    if (window.clearSelection) window.clearSelection();
+  });
+  document.addEventListener('click', function (e) {
+    if (!window.selectedTaskIds || window.selectedTaskIds.size === 0) return;
+    var body = e.target.closest && e.target.closest('.col-body');
+    if (!body) return;
+    if (e.target.closest && e.target.closest('.card')) return;
+    if (window.clearSelection) window.clearSelection();
+  });
+
+  var bulkBarBindingsDone = false;
+  function ensureBulkBarBindings() {
+    if (bulkBarBindingsDone) return;
+    bulkBarBindingsDone = true;
+    var applyBtn = document.getElementById('bulk-apply');
+    var clearBtn = document.getElementById('bulk-clear');
+    if (applyBtn) {
+      applyBtn.addEventListener('click', async function () {
+        var ids = Array.from(window.selectedTaskIds || []);
+        if (ids.length === 0) return;
+        var updates = {};
+        var colEl = document.getElementById('bulk-col');
+        var stageEl = document.getElementById('bulk-stage');
+        var prioEl = document.getElementById('bulk-priority');
+        var agentEl = document.getElementById('bulk-agent');
+        var sizeEl = document.getElementById('bulk-size');
+        var hoursEl = document.getElementById('bulk-hours');
+        if (colEl && colEl.value) updates.col = normalizeApiCol(colEl.value);
+        if (stageEl && stageEl.value) updates.stage = stageEl.value.trim();
+        if (prioEl && prioEl.value) updates.priority = parseInt(prioEl.value, 10);
+        if (agentEl && agentEl.value) updates.agent = agentEl.value.trim();
+        if (sizeEl && sizeEl.value) updates.size = sizeEl.value.trim();
+        if (hoursEl && hoursEl.value !== '') updates.hours = parseFloat(hoursEl.value) || 0;
+        if (Object.keys(updates).length === 0) {
+          showError('Выберите хотя бы одно поле для изменения');
+          return;
+        }
+        applyBtn.disabled = true;
+        try {
+          await Promise.all(ids.map(function (id) {
+            return apiFetch('/tasks/' + id, { method: 'PATCH', body: updates });
+          }));
+          window.clearSelection();
+          await loadTasksForActiveProject();
+          render();
+          syncColumnEmptyStates();
+          updateStageTabs();
+          scheduleHeaderRefresh();
+          showInfo('Изменения применены');
+        } catch (err) {
+          showError('Ошибка применения: ' + (err.message || err));
+        } finally {
+          applyBtn.disabled = false;
+        }
+      });
+    }
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function () {
+        window.clearSelection();
+      });
+    }
+  }
+
   updateStats = function () {
     syncColumnEmptyStates();
     scheduleHeaderRefresh();
@@ -5300,13 +6183,13 @@
     const weeks = parseInt(document.getElementById('ps-weeks').value, 10) || 0;
     const budgetInputValue = parseInt(document.getElementById('ps-budget').value, 10) || 0;
     const stageSettings = collectStageSettingsFromModal();
+    const agentSettings = collectAgentSettingsFromModal();
+    const priorityOptions = collectPriorityOptionsFromModal();
+    const sizeOptions = collectSizeOptionsFromModal();
+    const columnSettings = collectColumnSettingsFromModal();
 
     if (!name) {
       document.getElementById('ps-name').focus();
-      return;
-    }
-    if (stageSettings.length === 0) {
-      showError('Добавьте хотя бы один этап проекта');
       return;
     }
 
@@ -5327,6 +6210,10 @@
             return item.name;
           }),
           stage_settings: stageSettings,
+          agent_settings: agentSettings,
+          priority_options: priorityOptions.length > 0 ? priorityOptions : undefined,
+          size_options: sizeOptions.length > 0 ? sizeOptions : undefined,
+          column_settings: columnSettings,
         };
         if (responsibleId) {
           payload.responsible_user_id = responsibleId;
@@ -5348,8 +6235,8 @@
           syncProjectBudgetInputFromStageRows();
           showInfo(
             'Добавлены этапы с существующими задачами: ' +
-              resolved.addedStages.join(', ') +
-              '. Проверьте их в форме и нажмите «Сохранить» еще раз.'
+            resolved.addedStages.join(', ') +
+            '. Проверьте их в форме и нажмите «Сохранить» еще раз.'
           );
           return;
         }
@@ -5362,6 +6249,10 @@
             return item.name;
           }),
           stage_settings: finalStageSettings,
+          agent_settings: agentSettings,
+          priority_options: priorityOptions.length > 0 ? priorityOptions : undefined,
+          size_options: sizeOptions.length > 0 ? sizeOptions : undefined,
+          column_settings: columnSettings,
         };
 
         await applyPendingStageActions(editingProjId, finalStageSettings);
@@ -5410,9 +6301,70 @@
         showError('Нельзя удалить этап, пока в нем есть задачи. Выберите перенос или удаление задач.');
         return;
       }
+      var errBody = error.body || (error.json && typeof error.json === 'function' ? error.json() : null);
+      if (errBody && errBody.error === 'column_has_tasks' && Array.isArray(errBody.columns) && errBody.columns.length > 0) {
+        var cols = errBody.columns;
+        var targetOptions = columnSettings.filter(function (c) { return !cols.some(function (r) { return (r.col || '').toLowerCase() === (c.id || '').toLowerCase(); }); });
+        var targetCol = await openColumnMoveTasksModal(cols, targetOptions);
+        if (targetCol) {
+          try {
+            var projTasks = await getTasksForProject(editingProjId);
+            var apiCol = targetCol === 'inprogress' ? 'doing' : targetCol;
+            for (var i = 0; i < cols.length; i++) {
+              var fromCol = cols[i].col;
+              var inCol = projTasks.filter(function (t) { return (t.col || '').toLowerCase().replace('inprogress', 'doing') === (fromCol || '').toLowerCase(); });
+              for (var j = 0; j < inCol.length; j++) {
+                var tid = inCol[j].raw_id || inCol[j].id;
+                if (tid) await apiFetch('/tasks/' + tid + '/move', { method: 'POST', body: { col: apiCol } });
+              }
+            }
+            showInfo('Задачи перенесены. Сохраняю настройки...');
+            return saveProjSettings();
+          } catch (e) {
+            showError('Не удалось перенести задачи: ' + (e.message || e));
+          }
+        }
+        return;
+      }
       showError('Project save failed: ' + error.message);
     }
   };
+
+  async function openColumnMoveTasksModal(affectedColumns, targetOptions) {
+    return new Promise(function (resolve) {
+      var ov = document.getElementById('column-move-tasks-ov');
+      if (!ov) {
+        ov = document.createElement('div');
+        ov.id = 'column-move-tasks-ov';
+        ov.className = 'overlay open';
+        ov.innerHTML = ''
+          + '<div class="bridge-confirm-card" style="max-width:420px">'
+          + '<div class="bridge-confirm-title">В колонках есть задачи</div>'
+          + '<div class="bridge-confirm-sub" id="column-move-sub"></div>'
+          + '<div style="margin-top:12px;"><label style="font-size:12px;color:var(--tx2);">Перенести в:</label>'
+          + '<select id="column-move-target" class="bridge-delete-input" style="margin-top:6px;width:100%"></select></div>'
+          + '<div class="bridge-confirm-row" style="justify-content:flex-end;margin-top:16px;gap:8px">'
+          + '<button class="bridge-confirm-btn no" id="column-move-cancel">Отмена</button>'
+          + '<button class="bridge-confirm-btn yes" id="column-move-ok">Перенести и сохранить</button>'
+          + '</div></div>';
+        document.body.appendChild(ov);
+      }
+      var sub = document.getElementById('column-move-sub');
+      var targetSel = document.getElementById('column-move-target');
+      var cancelBtn = document.getElementById('column-move-cancel');
+      var okBtn = document.getElementById('column-move-ok');
+      if (!sub || !targetSel || !cancelBtn || !okBtn) { resolve(null); return; }
+      var lines = affectedColumns.map(function (r) { return r.col + ': ' + r.cnt + ' задач'; });
+      sub.textContent = 'В скрываемых колонках: ' + lines.join(', ') + '. Выберите колонку для переноса:';
+      targetSel.innerHTML = targetOptions.map(function (c) {
+        return '<option value="' + (c.id === 'doing' ? 'inprogress' : c.id) + '">' + escapeHtml(c.label || c.id) + '</option>';
+      }).join('');
+      if (targetOptions.length > 0) targetSel.value = targetOptions[0].id === 'doing' ? 'inprogress' : targetOptions[0].id;
+      ov.classList.add('open');
+      cancelBtn.onclick = function () { ov.classList.remove('open'); resolve(null); };
+      okBtn.onclick = function () { ov.classList.remove('open'); resolve(targetSel.value || null); };
+    });
+  }
 
   deleteProject = async function () {
     if (!editingProjId || editingProjId === '__new__') {
@@ -5439,7 +6391,7 @@
       }
     }
     const msg =
-      'Удалить проект «' + (project.name || '') + '»? Будет удалено ' + taskCount + ' задач. Это действие необратимо.';
+      'Удалить проект «' + (project.name || '') + '»? Будет удалено ' + taskCount + ' задач и вся история действий. Это действие необратимо.';
     if (!confirm(msg)) {
       return;
     }
@@ -5453,6 +6405,7 @@
       await loadTasksForActiveProject();
       applyProjectSettings();
       renderProjList();
+      if (typeof renderProfileSection === 'function') renderProfileSection();
       render();
       syncColumnEmptyStates();
       updateStageTabs();
@@ -5548,6 +6501,17 @@
     }
   };
 
+  let aiChatAbortController = null;
+
+  window.handleAiSendClick = function () {
+    const button = document.getElementById('ai-btn');
+    if (button && button.classList.contains('stop-state')) {
+      if (aiChatAbortController) aiChatAbortController.abort();
+      return;
+    }
+    sendMsg();
+  };
+
   sendMsg = async function () {
     const input = document.getElementById('ai-in');
     const text = input.value.trim();
@@ -5566,13 +6530,31 @@
     chatHist.push({ role: 'user', content: text });
 
     const button = document.getElementById('ai-btn');
-    button.disabled = true;
+    if (button) {
+      button.disabled = false;
+      button.classList.add('stop-state');
+      var icon = button.querySelector('.ai-send-icon');
+      if (icon) icon.textContent = '\u25A0';
+      button.setAttribute('aria-label', 'Остановить');
+    }
+    aiChatAbortController = new AbortController();
     showTyping('ai-msgs');
+
+    var provWrap = document.getElementById('tc-llm-provider');
+    var modWrap = document.getElementById('tc-llm-model');
+    var provSel = provWrap ? provWrap.querySelector('select') : null;
+    var modSel = modWrap ? modWrap.querySelector('select') : null;
+    var provider = provSel && provSel.value ? provSel.value.trim() : '';
+    var model = modSel && modSel.value ? modSel.value.trim() : '';
+    var body = { content: text };
+    if (provider) body.provider = provider;
+    if (model) body.model = model;
 
     try {
       const response = await apiFetch('/tasks/' + rawId + '/chat', {
         method: 'POST',
-        body: { content: text },
+        body: body,
+        signal: aiChatAbortController.signal,
       });
 
       hideTyping('ai-msgs');
@@ -5585,77 +6567,401 @@
       }
     } catch (error) {
       hideTyping('ai-msgs');
-      appendTo('ai-msgs', 'ai', '! Ошибка чата: ' + (error.message || 'unknown'));
+      if (error.name === 'AbortError') {
+        appendTo('ai-msgs', 'ai', 'Запрос остановлен.');
+      } else {
+        let msg = '! Ошибка чата: ' + (error.message || 'unknown');
+        if (error.message === 'llm_unavailable' || (error.body && error.body.error === 'llm_unavailable')) {
+          var hint = error.body && error.body.hint;
+          if (hint === 'missing_api_key') {
+            msg = 'LLM недоступна: не задан API-ключ. Задайте ключ в Профиль → Настройки LLM.';
+          } else if (hint === 'request_failed') {
+            msg = 'Запрос к LLM не выполнен (сеть, таймаут или ошибка провайдера). Проверьте логи сервера.';
+          } else if (hint === 'provider_error') {
+            msg = 'API провайдера вернул ошибку (ключ или лимит). Проверьте ключ и квоты в консоли провайдера.';
+          } else {
+            msg = 'LLM временно недоступна. Проверьте настройки в Профиль → Настройки LLM.';
+          }
+        } else if (error.body && error.body.error === 'internal_error' && error.body.message) {
+          msg = '! Ошибка: ' + error.body.message;
+        }
+        appendTo('ai-msgs', 'ai', msg);
+      }
+    } finally {
+      aiChatAbortController = null;
+      if (button) {
+        button.classList.remove('stop-state');
+        var icon = button.querySelector('.ai-send-icon');
+        if (icon) icon.textContent = '\u2191';
+        button.setAttribute('aria-label', 'Отправить');
+        button.disabled = false;
+      }
     }
-
-    button.disabled = false;
   };
 
-  sendNewTask = async function () {
-    const input = document.getElementById('nt-ta');
-    const text = input.value.trim();
-    if (!text) {
-      return;
-    }
+  const TECHLEAD_SYSTEM_PROMPT_BASE =
+    'Ты — TechLead. Помогаешь добавить задачу в канбан-проект.\n\n' +
+    'Контекст проекта:\n{snapshot_md}\n\n' +
+    'Твои действия:\n' +
+    '1. Задай 1-2 уточняющих вопроса если задача не ясна\n' +
+    '2. Предложи подходящий этап из существующих в проекте\n' +
+    '3. Если задача зависит от другой — укажи depends_on (ID задачи)\n' +
+    '4. Когда всё ясно — сформируй задачу в JSON внутри блока ```task\n\n' +
+    'Формат JSON:\n' +
+    "{\n  'title': '...',\n  'stage': '...',\n  'priority': 'high|mid|low|none',\n  'descript': '...',\n  'agent': 'Claude',\n  'depends_on': ['T-000001']\n}\n\n" +
+    'Отвечай кратко. Один вопрос за раз.\n\n' +
+    'Зависимости — это блокирующие связи: задача B не может быть начата пока не завершена задача A. Не путай с порядком приоритетов. ' +
+    'Предлагай зависимость только если это ТЕХНИЧЕСКИ необходимо, не по хронологии.';
 
-    input.value = '';
-    input.style.height = 'auto';
-    appendTo('nt-chat', 'user', text);
-    ntHist.push({ role: 'user', content: text });
+  let ntSnapshotMd = '';
+  let ntAiHistory = null;
+  let ntAiAbortController = null;
 
-    const button = document.getElementById('nt-btn');
-    button.disabled = true;
-    showTyping('nt-chat');
+  const NT_LLM_PROVIDERS = [
+    { value: 'anthropic', label: 'Anthropic' }, { value: 'openai', label: 'OpenAI' },
+    { value: 'deepseek', label: 'DeepSeek' }, { value: 'groq', label: 'Groq' },
+    { value: 'qwen', label: 'Qwen' }, { value: 'custom', label: 'Custom' },
+  ];
+  const NT_LLM_STORAGE_KEY = 'pk24_llm_new_task';
+  const TC_LLM_STORAGE_KEY = 'pk24_llm_task_edit';
+  const IMP_LLM_STORAGE_KEY = 'pk24_llm_import';
 
-    try {
-      if (text.length < 12) {
-        hideTyping('nt-chat');
-        appendTo('nt-chat', 'ai', 'Уточни задачу подробнее: цель, результат и ограничения.');
-        button.disabled = false;
+  function initLlmSelectors(provSelId, modSelId, storageKey) {
+    var provWrap = document.getElementById(provSelId);
+    var modWrap = document.getElementById(modSelId);
+    if (!provWrap || !modWrap) return;
+    var provSel = provWrap.querySelector ? provWrap.querySelector('select') : provWrap;
+    var modSel = modWrap.querySelector ? modWrap.querySelector('select') : modWrap;
+    if (!provSel || !modSel) return;
+    var row = provWrap.parentElement;
+    var impLabel = row ? row.querySelector('label') : null;
+
+    /* Скрываем до проверки API ключей — иначе при медленной загрузке показываются пустые поля */
+    provWrap.style.display = 'none';
+    modWrap.style.display = 'none';
+    if (impLabel) impLabel.style.display = 'none';
+
+    var saveToStorage = function () {
+      try {
+        var pv = provSel ? provSel.value : '';
+        var mv = modSel ? modSel.value : '';
+        localStorage.setItem(storageKey, JSON.stringify({ provider: pv, model: mv }));
+      } catch (e) { }
+    };
+
+    apiFetch('/api/llm/api-keys').catch(function () { return { keys: [] }; }).then(function (keysRes) {
+      var keys = Array.isArray(keysRes && keysRes.keys) ? keysRes.keys : [];
+      var hasKeySet = {};
+      keys.forEach(function (k) { if (k && k.provider && k.has_key) hasKeySet[k.provider] = true; });
+      var provOpts = NT_LLM_PROVIDERS.filter(function (p) { return hasKeySet[p.value]; }).map(function (p) { return { value: p.value, label: p.label }; });
+
+      var prevEmpty = row ? row.querySelector('.llm-choose-provider-wrap') : null;
+      if (prevEmpty) prevEmpty.remove();
+
+      if (provOpts.length === 0) {
+        provWrap.style.display = 'none';
+        modWrap.style.display = 'none';
+        if (impLabel) impLabel.style.display = 'none';
+        var wrap = document.createElement('div');
+        wrap.className = 'llm-choose-provider-wrap';
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'llm-choose-provider-btn';
+        btn.textContent = 'Выберите LLM провайдера';
+        btn.onclick = function () {
+          var to = document.getElementById('task-ov');
+          if (to) to.classList.remove('open');
+          var tc = document.getElementById('task-create-ov');
+          if (tc) tc.classList.remove('open');
+          var io = document.getElementById('imp-ov');
+          if (io) io.classList.remove('open');
+          if (typeof window.openProfilePanel === 'function') window.openProfilePanel('llm_keys');
+        };
+        wrap.appendChild(btn);
+        if (row) row.insertBefore(wrap, provWrap);
         return;
       }
 
-      const response = await apiFetch('/llm/task-dialog', {
-        method: 'POST',
-        body: {
-          project_id: activeProjId || null,
-          messages: ntHist,
-        },
+      provWrap.style.display = '';
+      modWrap.style.display = '';
+      if (impLabel) impLabel.style.display = '';
+
+      provSel.innerHTML = '';
+      provOpts.forEach(function (p) {
+        var o = document.createElement('option');
+        o.value = p.value;
+        o.textContent = p.label;
+        provSel.appendChild(o);
       });
 
-      const preview = mapTaskDialogToPreview(response);
-      pendingTask = preview;
-      ntHist.push({
-        role: 'assistant',
-        content:
-          'Сформировал задачу: ' +
-          preview.title +
-          '. Проверь и подтвердите добавление в backlog.',
-      });
-      hideTyping('nt-chat');
-      appendTo(
-        'nt-chat',
-        'ai',
-        'Сформировал задачу. Проверьте блок preview ниже и нажмите "Добавить в Backlog".'
-      );
-      showPreview(preview);
-    } catch (error) {
-      hideTyping('nt-chat');
-      appendTo('nt-chat', 'ai', '! LLM error: ' + error.message);
-    }
+      var saved = {};
+      try {
+        var raw = localStorage.getItem(storageKey);
+        if (raw) saved = JSON.parse(raw) || {};
+      } catch (e) { }
+      var model = saved.model || '';
+      var provider = saved.provider || 'anthropic';
+      if (provOpts.some(function (p) { return p.value === provider; })) {
+        provSel.value = provider;
+      } else {
+        provSel.value = provOpts[0].value;
+        provider = provOpts[0].value;
+      }
 
-    button.disabled = false;
+      var loadModelsPlain = function () {
+        if (!provSel.value) { modSel.innerHTML = ''; modSel.disabled = true; return; }
+        modSel.innerHTML = '<option value="">Загрузка...</option>';
+        modSel.disabled = true;
+        apiFetch('/api/llm/models?provider=' + encodeURIComponent(provSel.value)).catch(function () { return { models: [] }; }).then(function (res) {
+          var models = Array.isArray(res && res.models) ? res.models : [];
+          modSel.innerHTML = models.map(function (m) { return '<option value="' + String(m).replace(/"/g, '&quot;') + '">' + String(m).replace(/</g, '&lt;') + '</option>'; }).join('');
+          if (model && models.indexOf(model) >= 0) modSel.value = model;
+          else if (models.length) modSel.value = models[0];
+          modSel.disabled = models.length === 0;
+          saveToStorage();
+          if (typeof pkDropdownInit === 'function') pkDropdownInit(row || document);
+        });
+      };
+      loadModelsPlain();
+      provSel.onchange = function () {
+        saveToStorage();
+        modSel.innerHTML = '<option value="">Загрузка...</option>';
+        modSel.disabled = true;
+        apiFetch('/api/llm/models?provider=' + encodeURIComponent(provSel.value)).catch(function () { return { models: [] }; }).then(function (res) {
+          var models = Array.isArray(res && res.models) ? res.models : [];
+          modSel.innerHTML = models.map(function (m) { return '<option value="' + String(m).replace(/"/g, '&quot;') + '">' + String(m).replace(/</g, '&lt;') + '</option>'; }).join('');
+          if (models.length) modSel.value = models[0];
+          modSel.disabled = models.length === 0;
+          saveToStorage();
+          if (typeof pkDropdownInit === 'function') pkDropdownInit(row || document);
+        });
+      };
+      modSel.onchange = saveToStorage;
+      if (typeof pkDropdownInit === 'function') pkDropdownInit(row || document);
+    });
+  }
+
+  window.initNtLlmSelectors = function () {
+    initLlmSelectors('nt-llm-provider', 'nt-llm-model', NT_LLM_STORAGE_KEY);
   };
 
-  confirmTask = async function () {
-    if (!pendingTask) {
+  window.initTcLlmSelectors = function () {
+    initLlmSelectors('tc-llm-provider', 'tc-llm-model', TC_LLM_STORAGE_KEY);
+  };
+
+  window.initImpLlmSelectors = function () {
+    initLlmSelectors('imp-llm-provider', 'imp-llm-model', IMP_LLM_STORAGE_KEY);
+  };
+
+  window.handleNtSendClick = function () {
+    const button = document.getElementById('nt-btn');
+    if (button && button.classList.contains('stop-state')) {
+      if (ntAiAbortController) ntAiAbortController.abort();
       return;
     }
+    if (window.sendNewTaskAi) window.sendNewTaskAi();
+  };
+
+  window.sendNewTaskAi = async function () {
+    const input = document.getElementById('nt-ta');
+    const text = input && input.value ? input.value.trim() : '';
+    if (!text) return;
+
+    if (!input) return;
+    input.value = '';
+    input.style.height = 'auto';
+
+    const chatEl = document.getElementById('nt-chat');
+    if (chatEl && typeof appendTo === 'function') appendTo('nt-chat', 'user', text);
+
+    if (!ntAiHistory) ntAiHistory = [];
+    ntAiHistory.push({ role: 'user', content: text });
+
+    const button = document.getElementById('nt-btn');
+    if (button) {
+      button.disabled = false;
+      button.classList.add('stop-state');
+      var icon = button.querySelector('.nt-send-icon');
+      if (icon) icon.textContent = '\u25A0';
+      button.setAttribute('aria-label', 'Остановить');
+    }
+    ntAiAbortController = new AbortController();
+    if (typeof showTyping === 'function') showTyping('nt-chat');
 
     try {
-      await createTaskFromPreview(pendingTask);
+      const systemPrompt = TECHLEAD_SYSTEM_PROMPT_BASE.replace(
+        '{snapshot_md}',
+        ntSnapshotMd || '(Снапшот не загружен)'
+      );
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'assistant', content: 'Привет! Я TechLead. Опиши задачу которую нужно добавить.' },
+      ].concat(ntAiHistory.filter(function (m) { return m.role !== 'system'; }));
+
+      var provWrap = document.getElementById('nt-llm-provider');
+      var modWrap = document.getElementById('nt-llm-model');
+      var provSel = provWrap ? provWrap.querySelector('select') : null;
+      var modSel = modWrap ? modWrap.querySelector('select') : null;
+      var provider = provSel && provSel.value ? provSel.value.trim() : '';
+      var model = modSel && modSel.value ? modSel.value.trim() : '';
+      var body = {
+        purpose: 'new_task',
+        project_id: activeProjId || null,
+        messages: messages,
+        params: { max_tokens: 1400, temperature: 0.2 },
+      };
+      if (provider) body.provider = provider;
+      if (model) body.model = model;
+
+      const response = await apiFetch('/api/llm/chat', {
+        method: 'POST',
+        body: body,
+        signal: ntAiAbortController.signal,
+      });
+
+      const reply = (response && response.text) ? String(response.text) : '';
+      ntAiHistory.push({ role: 'assistant', content: reply });
+      if (typeof hideTyping === 'function') hideTyping('nt-chat');
+
+      const taskMatch = reply.match(/```task\s*([\s\S]*?)```/);
+      if (taskMatch) {
+        try {
+          const raw = taskMatch[1].trim().replace(/'/g, '"');
+          const parsed = JSON.parse(raw);
+          const priorityMap = { high: 3, mid: 2, medium: 2, low: 1, none: 0 };
+          const p = String((parsed.priority || 'mid')).toLowerCase();
+          parsed.priority = priorityMap[p] !== undefined ? priorityMap[p] : 2;
+          parsed.desc = parsed.descript || parsed.desc || '';
+          parsed.depends_on = Array.isArray(parsed.depends_on) ? parsed.depends_on : [];
+          pendingTask = parsed;
+          const cleanReply = reply.replace(/```task[\s\S]*?```/g, '').trim();
+          if (cleanReply && chatEl && typeof appendTo === 'function') {
+            appendTo('nt-chat', 'ai', cleanReply);
+          }
+          if (typeof window.showPreviewFromAi === 'function') window.showPreviewFromAi(pendingTask);
+        } catch (e) {
+          if (chatEl && typeof appendTo === 'function') appendTo('nt-chat', 'ai', reply);
+        }
+      } else {
+        if (chatEl && typeof appendTo === 'function') appendTo('nt-chat', 'ai', reply);
+      }
+    } catch (error) {
+      if (typeof hideTyping === 'function') hideTyping('nt-chat');
+      if (error.name === 'AbortError') {
+        if (chatEl && typeof appendTo === 'function') appendTo('nt-chat', 'ai', 'Запрос остановлен.');
+      } else {
+        const errMsg = (error.body && error.body.error === 'llm_unavailable')
+          ? 'LLM недоступна. Проверьте настройки в Профиль → Настройки LLM.'
+          : 'Ошибка: ' + (error.message || 'unknown');
+        if (chatEl && typeof appendTo === 'function') appendTo('nt-chat', 'ai', errMsg);
+      }
+    } finally {
+      ntAiAbortController = null;
+      if (button) {
+        button.classList.remove('stop-state');
+        var icon = button.querySelector('.nt-send-icon');
+        if (icon) icon.textContent = '\u2191';
+        button.setAttribute('aria-label', 'Отправить');
+        button.disabled = false;
+      }
+    }
+  };
+
+  window.showPreviewFromAi = function (t) {
+    pendingTask = t;
+    const pvTitle = document.getElementById('pv-title');
+    const pvGrid = document.getElementById('pv-grid');
+    const pvDesc = document.getElementById('pv-desc');
+    const pvDeps = document.getElementById('pv-deps');
+    const pv = document.getElementById('task-preview');
+    const btnAdd = document.getElementById('btn-add-backlog');
+    if (!pv) return;
+
+    if (pvTitle) pvTitle.textContent = t.title || 'Без названия';
+    const stC = typeof getStageColorFromProject === 'function' ? getStageColorFromProject(t.stage) : (getStageColor ? getStageColor(t.stage) : '#6B7280');
+    const agC = typeof getAgentColor === 'function' ? getAgentColor(t.agent) : '#6B7280';
+    if (pvGrid) {
+      pvGrid.innerHTML =
+        '<div class="pv-chip"><div class="pv-chip-lbl">Этап</div><div class="pv-chip-val" style="color:' + stC + '">' + (t.stage || '—') + '</div></div>' +
+        '<div class="pv-chip"><div class="pv-chip-lbl">Приоритет</div><div class="pv-chip-val">' + (t.priority === 3 ? 'High' : t.priority === 2 ? 'Mid' : t.priority === 1 ? 'Low' : '—') + '</div></div>' +
+        '<div class="pv-chip"><div class="pv-chip-lbl">Агент</div><div class="pv-chip-val" style="color:' + agC + '">' + (t.agent || '—') + '</div></div>';
+    }
+    if (pvDesc) pvDesc.textContent = t.desc || t.descript || '';
+    if (pvDeps && t.depends_on && t.depends_on.length > 0) {
+      const depLabels = t.depends_on.map(function (id) {
+        const tid = String(id).replace(/^T-0*/, '');
+        const num = parseInt(tid, 10);
+        const task = tasks.find(function (x) {
+          var pid = x.public_id;
+          if (pid != null && Number(pid) === num) return true;
+          var sid = 'T-' + String(pid || '').padStart(6, '0');
+          return sid === id || sid === String(id);
+        });
+        return task ? (id + ' "' + (task.title || '') + '"') : id;
+      });
+      pvDeps.innerHTML = '&#128274; Зависит от: ' + depLabels.join(', ');
+      pvDeps.style.display = '';
+    } else if (pvDeps) {
+      pvDeps.innerHTML = '';
+      pvDeps.style.display = 'none';
+    }
+    pv.classList.add('show');
+    if (btnAdd) btnAdd.disabled = false;
+    setTimeout(function () { pv.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 100);
+  };
+
+  window.confirmTaskFromAi = async function () {
+    if (!pendingTask || !activeProjId) return;
+
+    const btn = document.getElementById('btn-add-backlog');
+    if (btn) btn.disabled = true;
+
+    try {
+      const priority = Number(pendingTask.priority || 2);
+      const payload = {
+        title: String(pendingTask.title || '').trim() || 'Без названия',
+        stage: String(pendingTask.stage || '').trim() || (getCurrentProjectStages()[0] || ''),
+        col: 'backlog',
+        agent: String(pendingTask.agent || '').trim() || null,
+        priority: priority >= 1 && priority <= 4 ? priority : 2,
+        descript: String(pendingTask.desc || pendingTask.descript || '').trim() || null,
+        deps: null,
+      };
+
+      const created = await apiFetch('/projects/' + activeProjId + '/tasks', {
+        method: 'POST',
+        body: payload,
+      });
+
+      const newTaskId = created && created.task && created.task.id ? created.task.id : null;
+      const dependsOn = pendingTask.depends_on || [];
+
+      if (newTaskId && dependsOn.length > 0) {
+        for (var i = 0; i < dependsOn.length; i++) {
+          var depId = dependsOn[i];
+          var pubIdNum = parseInt(String(depId).replace(/^T-0*/, ''), 10);
+          if (!pubIdNum) continue;
+          var depTask = tasks.find(function (x) {
+            return x.public_id != null && Number(x.public_id) === pubIdNum;
+          });
+          if (!depTask || !depTask.raw_id) continue;
+          try {
+            await apiFetch('/tasks/' + newTaskId + '/dependencies', {
+              method: 'POST',
+              body: { depends_on_task_id: depTask.raw_id },
+            });
+          } catch (depErr) {
+            if (depErr.body && depErr.body.error === 'cyclic_dependency') {
+              showError('Нельзя добавить зависимость: возникает цикл');
+            } else {
+              showError('Ошибка зависимости: ' + (depErr.message || ''));
+            }
+          }
+        }
+      }
+
       pendingTask = null;
-      closeNewTask();
+      if (typeof closeNewTask === 'function') closeNewTask();
       await loadTasksForActiveProject();
       render();
       syncColumnEmptyStates();
@@ -5665,9 +6971,23 @@
       applyTimerFromSnapshot();
       showInfo('Задача добавлена');
     } catch (error) {
-      showError('Task create failed: ' + error.message);
+      showError('Ошибка: ' + (error.message || 'Task create failed'));
+    } finally {
+      if (btn) btn.disabled = false;
     }
   };
+
+  window.reviseTask = function () {
+    const pv = document.getElementById('task-preview');
+    if (pv) pv.classList.remove('show');
+    pendingTask = null;
+    if (typeof appendTo === 'function') appendTo('nt-chat', 'ai', 'Хорошо, что именно поменять? Этап, агента, приоритет или описание?');
+    var ta = document.getElementById('nt-ta');
+    if (ta) ta.focus();
+  };
+
+  sendNewTask = window.sendNewTaskAi;
+  confirmTask = window.confirmTaskFromAi;
 
   let lastImportParsedData = null;
   let importConfirmReadyAt = 0;
@@ -5737,9 +7057,11 @@ ${projectContext}
 
 Изучи все листы. Извлеки ТОЛЬКО задачи — строки которые описывают конкретную работу для реализации.
 Игнорируй: матрицы зависимостей, легенды, сводки, служебные таблицы, заголовки разделов, строки-описания формата.
-Верни ТОЛЬКО JSON-массив без markdown. Первый символ [, последний ].
-Формат: [{"title":"...","stage":"...","description":"...","priority":1|2|3|4,"hours":число или null,"size":"XS|S|M|L|XL","deps":"id1,id2" или []}]
-priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки (priority, urgency, importance, significance, vital, crucial, critical, necessity, essential, indispensable, приоритет, срочность, важность и т.п.). hours, size, deps — извлекай из таблицы.
+Верни ТОЛЬКО JSON без markdown. Варианты:
+1) Массив задач: [{"title":"...","stage":"...","agent":"...","description":"...","priority":1|2|3|4,"hours":число или null,"size":"XS|S|M|L|XL","deps":"id1,id2" или []}]
+2) Объект проекта (если есть общая инфа): {"project_name":"...","project_description":"...","project_budget":число или null,"duration_weeks":число или null,"tasks":[...]} — project_budget и duration_weeks извлекай из файла (бюджет, стоимость, срок, недели), если есть.
+agent: исполнитель/ответственный из колонок (Assignee, Ответственный, Executor, Developer, Designer и т.п.). Если нет — пустая строка или null.
+priority: 1=Low, 2=Medium, 3=High, 4=Critical. hours, size, deps — извлекай из таблицы.
 
 Текст для анализа:
 ` +
@@ -5773,8 +7095,14 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
     document.getElementById('import-confirm-type').textContent = 'Тип: ' + typeLabel;
     document.getElementById('import-confirm-name').textContent = 'Название: ' + name;
     document.getElementById('import-confirm-desc').textContent = 'Описание: ' + desc;
-    document.getElementById('import-confirm-tasks-count').textContent =
-      'Задач распознано: ' + tasksCount;
+    var statsText = 'Задач распознано: ' + tasksCount;
+    var agentsFromDoc = Array.isArray(data.tasks)
+      ? [...new Set(data.tasks.map(function (t) { return String(t.agent || '').trim(); }).filter(Boolean))].sort()
+      : [];
+    if (agentsFromDoc.length > 0) {
+      statsText += ' • Агенты: ' + agentsFromDoc.join(', ');
+    }
+    document.getElementById('import-confirm-tasks-count').textContent = statsText;
     const warnEl = document.getElementById('import-confirm-warnings');
     if (warnings.length) {
       warnEl.textContent = 'Предупреждения: ' + warnings.join('; ');
@@ -5788,6 +7116,99 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
     if (nameInput) {
       nameInput.value = name;
     }
+    var budgetInput = document.getElementById('import-confirm-budget');
+    var weeksInput = document.getElementById('import-confirm-weeks');
+    if (budgetInput) budgetInput.value = String(Number(data.project_budget) || 0);
+    if (weeksInput) weeksInput.value = String(Number(data.duration_weeks) || 12);
+
+    var taskList = Array.isArray(data.tasks) ? data.tasks : [];
+    var uniqueStages = [...new Set(taskList.map(function (t) { return String(t.stage || '').trim(); }).filter(Boolean))].sort();
+    var uniqueAgents = [...new Set(taskList.map(function (t) { return String(t.agent || '').trim(); }).filter(Boolean))].filter(function (a) { return a !== 'Без агента'; }).sort();
+    var stagePalette = ['#4a9eff', '#a78bfa', '#fb923c', '#f87171', '#4ade80', '#22d3ee', '#f59e0b', '#f472b6'];
+    var agentPalette = ['#4a9eff', '#a78bfa', '#fb923c', '#f87171', '#4ade80', '#22d3ee', '#f59e0b', '#f472b6'];
+
+    function renderImportStages(items) {
+      var list = document.getElementById('import-confirm-stages');
+      if (!list) return;
+      list.innerHTML = items.map(function (item, idx) {
+        return '<div class="import-confirm-row-item" data-stage-idx="' + idx + '">'
+          + '<input class="ps-input" data-field="stage-name" placeholder="Этап" value="' + escapeHtml(item.name || '') + '">'
+          + '<input class="ps-input" data-field="stage-budget" type="number" min="0" placeholder="0" value="' + Number(item.budget || 0) + '">'
+          + '<input type="color" data-field="stage-color" value="' + (item.color || '#4a9eff') + '" style="width:32px;height:28px;border:1px solid var(--bd);border-radius:6px;padding:2px;" title="Цвет">'
+          + '<button type="button" class="ps-stage-remove" data-action="remove-stage" title="Удалить">&times;</button></div>';
+      }).join('');
+      list.querySelectorAll('[data-action="remove-stage"]').forEach(function (btn) {
+        btn.onclick = function () {
+          var row = btn.closest('.import-confirm-row-item');
+          var idx = parseInt(row.getAttribute('data-stage-idx'), 10);
+          _importConfirmStages.splice(idx, 1);
+          renderImportStages(_importConfirmStages);
+        };
+      });
+    }
+    function renderImportAgents(items) {
+      var list = document.getElementById('import-confirm-agents');
+      if (!list) return;
+      list.innerHTML = items.map(function (item, idx) {
+        return '<div class="import-confirm-agent-row" data-agent-idx="' + idx + '">'
+          + '<input class="ps-input" data-field="agent-name" placeholder="Имя" value="' + escapeHtml(item.name || '') + '">'
+          + '<select class="ps-input" data-field="agent-type"><option value="ai"' + (item.type === 'human' ? '' : ' selected') + '>AI</option><option value="human"' + (item.type === 'human' ? ' selected' : '') + '>Human</option></select>'
+          + '<input type="color" data-field="agent-color" value="' + (item.color || '#6B7280') + '" style="width:40px;height:40px;border:1px solid var(--bd);border-radius:10px;background:var(--sf2);padding:4px;">'
+          + '<button type="button" class="ps-stage-remove" data-action="remove-agent" title="Удалить">&times;</button></div>';
+      }).join('');
+      list.querySelectorAll('[data-action="remove-agent"]').forEach(function (btn) {
+        btn.onclick = function () {
+          var row = btn.closest('.import-confirm-agent-row');
+          var idx = parseInt(row.getAttribute('data-agent-idx'), 10);
+          _importConfirmAgents.splice(idx, 1);
+          renderImportAgents(_importConfirmAgents);
+        };
+      });
+    }
+
+    var _importConfirmStages = uniqueStages.length > 0
+      ? [{ name: NO_STAGE, budget: 0, color: NO_STAGE_COLOR }].concat(
+        uniqueStages
+          .filter(function (s) { return String(s || '').trim().toLowerCase() !== NO_STAGE.toLowerCase(); })
+          .map(function (s, i) { return { name: s, budget: 0, color: stagePalette[(i + 1) % stagePalette.length] }; })
+      )
+      : [{ name: NO_STAGE, budget: 0, color: NO_STAGE_COLOR }];
+    var _importConfirmAgents = [{ name: 'Без агента', type: 'ai', color: '#6B7280' }].concat(
+      uniqueAgents.map(function (a, i) { return { name: a, type: 'ai', color: agentPalette[i % agentPalette.length] }; })
+    );
+    renderImportStages(_importConfirmStages);
+    renderImportAgents(_importConfirmAgents);
+
+    var addStageBtn = document.getElementById('import-confirm-add-stage');
+    var addAgentBtn = document.getElementById('import-confirm-add-agent');
+    if (addStageBtn) {
+      addStageBtn.onclick = function () {
+        _importConfirmStages.push({ name: '', budget: 0, color: stagePalette[_importConfirmStages.length % stagePalette.length] });
+        renderImportStages(_importConfirmStages);
+      };
+    }
+    if (addAgentBtn) {
+      addAgentBtn.onclick = function () {
+        _importConfirmAgents.push({ name: '', type: 'ai', color: agentPalette[(_importConfirmAgents.length - 1) % agentPalette.length] });
+        renderImportAgents(_importConfirmAgents);
+      };
+    }
+
+    var responsibleSel = document.getElementById('import-confirm-responsible');
+    if (responsibleSel) {
+      responsibleSel.innerHTML = '<option value="">—</option>';
+      apiFetch('/api/assignable-users').then(function (res) {
+        var users = Array.isArray(res && res.users) ? res.users : [];
+        users.forEach(function (u) {
+          var opt = document.createElement('option');
+          opt.value = u.id || '';
+          opt.textContent = u.email || '';
+          responsibleSel.appendChild(opt);
+        });
+        if (typeof pkDropdownInit === 'function') pkDropdownInit(document.getElementById('import-confirm-ov'));
+      }).catch(function () { });
+    }
+
     var newOpts = document.getElementById('import-confirm-new-opts');
     var currentOpts = document.getElementById('import-confirm-current-opts');
     var stageSelect = document.getElementById('import-confirm-default-stage');
@@ -5945,18 +7366,44 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
 
     if (createNew) {
       const name = projectName;
-      const taskListForStages = Array.isArray(parsedData.tasks) ? parsedData.tasks : [];
-      const uniqueStages = [...new Set(
-        taskListForStages.map(function (t) { return String(t.stage || '').trim(); }).filter(function (s) { return s; })
-      )];
+      var stageSettings = opts.stageSettings;
+      var agentSettings = opts.agentSettings;
+      var budgetTotal = opts.budgetTotal != null ? opts.budgetTotal : 0;
+      var durationWeeks = opts.durationWeeks != null ? opts.durationWeeks : 12;
+      var responsibleUserId = opts.responsibleUserId || null;
+      if (!stageSettings || !Array.isArray(stageSettings) || stageSettings.length === 0) {
+        const taskListForStages = Array.isArray(parsedData.tasks) ? parsedData.tasks : [];
+        const uniqueStages = [...new Set(
+          taskListForStages.map(function (t) { return String(t.stage || '').trim(); }).filter(function (s) { return s; })
+        )];
+        var palette = ['#4a9eff', '#a78bfa', '#fb923c', '#f87171', '#4ade80', '#22d3ee', '#f59e0b', '#f472b6'];
+        stageSettings = uniqueStages.length > 0
+          ? uniqueStages.map(function (s, idx) { return { name: s, budget: 0, color: palette[idx % palette.length] }; })
+          : [{ name: 'A', budget: 0, color: '#4a9eff' }];
+      }
+      if (!agentSettings || !Array.isArray(agentSettings) || agentSettings.length === 0) {
+        const taskListForAgents = Array.isArray(parsedData.tasks) ? parsedData.tasks : [];
+        const uniqueAgents = [...new Set(
+          taskListForAgents.map(function (t) { return String(t.agent || '').trim(); }).filter(function (s) { return s; })
+        )].filter(function (a) { return a !== 'Без агента'; });
+        var ap = ['#4a9eff', '#a78bfa', '#fb923c', '#f87171', '#4ade80', '#22d3ee', '#f59e0b', '#f472b6'];
+        agentSettings = [{ name: 'Без агента', type: 'ai', color: '#6B7280' }].concat(
+          uniqueAgents.map(function (a, idx) { return { name: a, type: 'ai', color: ap[idx % ap.length] }; })
+        );
+      }
+      const stages = stageSettings.map(function (s) { return s.name; });
+      var createBody = {
+        name: name,
+        budget_total: budgetTotal,
+        duration_weeks: durationWeeks,
+        stages: stages,
+        stage_settings: stageSettings,
+        agent_settings: agentSettings,
+      };
+      if (responsibleUserId) createBody.responsible_user_id = responsibleUserId;
       const created = await apiFetch('/projects', {
         method: 'POST',
-        body: {
-          name: name,
-          budget_total: 0,
-          duration_weeks: 12,
-          stages: uniqueStages,
-        },
+        body: createBody,
       });
       if (created && created.project && created.project.id) {
         targetProjectId = created.project.id;
@@ -6023,7 +7470,9 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
     for (let i = 0; i < taskList.length; i++) {
       const t = taskList[i];
       var rawStage = (t.stage && String(t.stage).trim()) || '';
-      var taskStage = (rawStage && projectStages.indexOf(rawStage) >= 0) ? rawStage : fallbackStage;
+      var taskStage = (rawStage && projectStages.some(function (s) { return String(s || '').toLowerCase() === rawStage.toLowerCase(); }))
+        ? (projectStages.find(function (s) { return String(s || '').toLowerCase() === rawStage.toLowerCase(); }) || rawStage)
+        : fallbackStage;
       const payload = {
         title: t.title || 'Без названия',
         col: apiCol(t.col),
@@ -6044,6 +7493,44 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
         method: 'POST',
         body: payload,
       });
+    }
+
+    if (targetProjectId && !createNew) {
+      var existingProject = projects.find(function (p) { return p.id === targetProjectId; });
+      var existingAgentNames = (existingProject && Array.isArray(existingProject.agentSettings))
+        ? existingProject.agentSettings.map(function (a) { return (a.name || '').toLowerCase(); })
+        : [];
+      var importAgentNames = [...new Set(
+        taskList.map(function (t) { return String(t.agent || '').trim(); }).filter(Boolean)
+      )];
+      var newAgents = importAgentNames.filter(function (a) {
+        return existingAgentNames.indexOf(a.toLowerCase()) < 0;
+      });
+      if (newAgents.length > 0 && existingProject) {
+        var palette = ['#4a9eff', '#a78bfa', '#fb923c', '#f87171', '#4ade80', '#22d3ee', '#f59e0b', '#f472b6', '#6B7280'];
+        var mergedAgentSettings = (existingProject.agentSettings || []).slice();
+        newAgents.forEach(function (a, idx) {
+          mergedAgentSettings.push({ name: a, type: 'ai', color: palette[idx % palette.length] });
+        });
+        try {
+          var projRes = await apiFetch('/projects/' + targetProjectId);
+          var proj = projRes && projRes.project ? projRes.project : existingProject;
+          await apiFetch('/projects/' + targetProjectId, {
+            method: 'PATCH',
+            body: {
+              name: proj.name,
+              duration_weeks: Number(proj.duration_weeks || 0),
+              budget_total: Number(proj.budget_total || 0),
+              stages: Array.isArray(proj.stages) ? proj.stages : [],
+              stage_settings: Array.isArray(proj.stage_settings) ? proj.stage_settings : [],
+              agent_settings: mergedAgentSettings,
+            },
+          });
+          await loadProjectsAndActive();
+        } catch (e) {
+          showInfo('Импорт задач выполнен. Не удалось обновить агентов: ' + (e.message || e));
+        }
+      }
     }
 
     if (targetProjectId) {
@@ -6078,17 +7565,50 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
     if (createNew && nameInput) {
       projectName = (nameInput.value || '').trim() || 'Импортированный проект';
     }
-    var defaultStage = '';
+    var defaultStage = NO_STAGE;
     var stageSelect = document.getElementById('import-confirm-default-stage');
-    if (!createNew && stageSelect && stageSelect.value) {
-      defaultStage = String(stageSelect.value).trim();
+    if (!createNew && stageSelect) {
+      defaultStage = String(stageSelect.value || '').trim() || NO_STAGE;
+    }
+    var importOpts = { projectName: projectName, defaultStage: defaultStage };
+    if (createNew) {
+      var stagesList = document.getElementById('import-confirm-stages');
+      var stageSettings = [];
+      if (stagesList) {
+        stagesList.querySelectorAll('.import-confirm-row-item').forEach(function (row) {
+          var n = (row.querySelector('[data-field="stage-name"]') || {}).value || '';
+          var b = parseInt((row.querySelector('[data-field="stage-budget"]') || {}).value, 10) || 0;
+          var c = (row.querySelector('[data-field="stage-color"]') || {}).value || '#4a9eff';
+          if (n.trim()) stageSettings.push({ name: n.trim(), budget: Math.max(0, b), color: c });
+        });
+      }
+      if (stageSettings.length === 0) stageSettings = [{ name: NO_STAGE, budget: 0, color: NO_STAGE_COLOR }];
+      var agentsList = document.getElementById('import-confirm-agents');
+      var agentSettings = [];
+      if (agentsList) {
+        agentsList.querySelectorAll('.import-confirm-agent-row').forEach(function (row) {
+          var n = (row.querySelector('[data-field="agent-name"]') || {}).value || '';
+          var t = (row.querySelector('[data-field="agent-type"]') || {}).value || 'ai';
+          var c = (row.querySelector('[data-field="agent-color"]') || {}).value || '#6B7280';
+          if (n.trim()) agentSettings.push({ name: n.trim(), type: t, color: c });
+        });
+      }
+      if (agentSettings.length === 0) agentSettings = [{ name: 'Без агента', type: 'ai', color: '#6B7280' }];
+      var budgetEl = document.getElementById('import-confirm-budget');
+      var weeksEl = document.getElementById('import-confirm-weeks');
+      var respEl = document.getElementById('import-confirm-responsible');
+      importOpts.stageSettings = stageSettings;
+      importOpts.agentSettings = agentSettings;
+      importOpts.budgetTotal = Math.max(0, parseInt(budgetEl && budgetEl.value, 10) || 0);
+      importOpts.durationWeeks = Math.max(0, parseInt(weeksEl && weeksEl.value, 10) || 12);
+      importOpts.responsibleUserId = (respEl && respEl.value) ? respEl.value : null;
     }
     const btn = document.getElementById('import-confirm-submit-btn');
     if (btn) {
       btn.disabled = true;
     }
     try {
-      await executeImport(data, createNew, currentId, { projectName: projectName, defaultStage: defaultStage });
+      await executeImport(data, createNew, currentId, importOpts);
       closeImportConfirm();
       if (typeof closeImport === 'function') {
         closeImport();
@@ -6220,7 +7740,15 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
             parseButton.disabled = false;
             return;
           }
+          var provWrap = document.getElementById('imp-llm-provider');
+          var modWrap = document.getElementById('imp-llm-model');
+          var provSel = provWrap && (provWrap.tagName === 'SELECT' ? provWrap : provWrap.querySelector('select'));
+          var modSel = modWrap && (modWrap.tagName === 'SELECT' ? modWrap : modWrap.querySelector('select'));
+          var provider = provSel && provSel.value ? provSel.value.trim() : '';
+          var model = modSel && modSel.value ? modSel.value.trim() : '';
           const body = { project_id: targetProjectId, content: content, file_name: fileName || null };
+          if (provider) body.provider = provider;
+          if (model) body.model = model;
           let jobId;
           try {
             const resp = await apiFetch('/import/async', { method: 'POST', body: body });
@@ -6323,38 +7851,39 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
 
       (async function doActualImportParse() {
         try {
-          let model = 'claude-sonnet-4-20250514';
-          try {
-            const settingsRes = await apiFetch('/api/llm/provider-settings');
-            const settings = Array.isArray(settingsRes && settingsRes.settings) ? settingsRes.settings : [];
-            const importSetting = settings.find(function (s) {
-              return s.purpose === 'import_parse' && s.is_enabled && s.model;
-            });
-            if (importSetting && importSetting.model) {
-              model = importSetting.model;
-            }
-          } catch (_) {
-            // нет настроек или таблица не создана — используем модель по умолчанию
-          }
+          var provWrap = document.getElementById('imp-llm-provider');
+          var modWrap = document.getElementById('imp-llm-model');
+          var provSel = provWrap && (provWrap.tagName === 'SELECT' ? provWrap : provWrap.querySelector('select'));
+          var modSel = modWrap && (modWrap.tagName === 'SELECT' ? modWrap : modWrap.querySelector('select'));
+          var provider = provSel && provSel.value ? provSel.value.trim() : '';
+          var model = modSel && modSel.value ? modSel.value.trim() : '';
           const prompt = buildImportPrompt(content, createNew, currentProject);
           const linesCount = content.split(/\r?\n/).length;
           const maxTokens = Math.min(32000, Math.max(4000, linesCount * 200));
+          var body = {
+            purpose: 'import_parse',
+            project_id: activeProjId || null,
+            messages: [{ role: 'user', content: prompt }],
+            params: { max_tokens: maxTokens, temperature: 0.1 },
+          };
+          if (provider) body.provider = provider;
+          if (model) body.model = model;
           const response = await apiFetch('/api/llm/chat', {
             method: 'POST',
-            body: {
-              purpose: 'import_parse',
-              project_id: activeProjId || null,
-              model: model,
-              messages: [{ role: 'user', content: prompt }],
-              params: { max_tokens: maxTokens, temperature: 0.1 },
-            },
+            body: body,
           });
 
           const text = response && response.text ? response.text : '';
           const parsed = tryParseImportJson(text);
-          const normalized = Array.isArray(parsed)
-            ? { detected_type: 'task_list', project_name: null, project_description: null, tasks: parsed, warnings: [] }
-            : parsed;
+          var normalized;
+          if (Array.isArray(parsed)) {
+            normalized = { detected_type: 'task_list', project_name: null, project_description: null, project_budget: null, duration_weeks: null, tasks: parsed, warnings: [] };
+          } else if (parsed && Array.isArray(parsed.tasks)) {
+            normalized = parsed;
+            if (!normalized.detected_type) normalized.detected_type = 'project';
+          } else {
+            normalized = null;
+          }
           if (!normalized || !Array.isArray(normalized.tasks)) {
             throw new Error('Не удалось разобрать ответ LLM');
           }
@@ -6411,7 +7940,7 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
             const hint = error.body && error.body.hint;
             let msg = 'LLM временно недоступна. Проверьте ключ Anthropic и доступность api.anthropic.com.';
             if (hint === 'missing_api_key') {
-              msg = 'LLM недоступна: не задан API-ключ Anthropic. Задайте ANTHROPIC_API_KEY на сервере или добавьте ключ в Профиль → Настройки LLM.';
+              msg = 'LLM недоступна: не задан API-ключ. Добавьте ключ в Профиль → LLM провайдеры.';
             } else if (hint === 'request_failed') {
               msg = 'Запрос к LLM не выполнен (сеть, таймаут или ошибка провайдера). Проверьте логи сервера и доступ из контейнера к api.anthropic.com.';
             } else if (hint === 'provider_error') {
@@ -6476,23 +8005,159 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
   };
 
   window.ensureNewTaskModalReady = function () {
-    ensureManualTaskCreatorUI();
     fillManualTaskStageOptions();
     resetManualTaskForm();
     setTaskCreateMode('ai');
   };
 
-  const originalOpenNewTask = openNewTask;
-  openNewTask = function (col) {
-    originalOpenNewTask(col);
-    window.ensureNewTaskModalReady();
+  function setNewTaskMode(mode) {
+    newTaskCreateMode = mode === 'manual' ? 'manual' : 'ai';
+    try { localStorage.setItem('pk24_new_task_mode', newTaskCreateMode); } catch (e) { }
+    var aiWrap = document.getElementById('new-task-ai-mode');
+    var manualWrap = document.getElementById('new-task-manual-mode');
+    var btnAi = document.getElementById('nt-mode-ai');
+    var btnManual = document.getElementById('nt-mode-manual');
+    var sub = document.getElementById('nt-sub');
+    if (mode === 'manual') {
+      if (aiWrap) aiWrap.classList.add('hide');
+      if (manualWrap) manualWrap.classList.add('show');
+      if (btnAi) btnAi.classList.remove('active');
+      if (btnManual) btnManual.classList.add('active');
+      if (sub) sub.textContent = 'Заполните поля вручную';
+    } else {
+      if (aiWrap) aiWrap.classList.remove('hide');
+      if (manualWrap) manualWrap.classList.remove('show');
+      if (btnAi) btnAi.classList.add('active');
+      if (btnManual) btnManual.classList.remove('active');
+      if (sub) sub.textContent = 'TechLead поможет сформулировать задачу';
+    }
+  }
+
+  window.openTaskCreate = function (col) {
+    newTaskCol = col || 'backlog';
+    const ov = document.getElementById('task-create-ov');
+    if (!ov) return;
+
+    var savedMode = 'ai';
+    try { savedMode = localStorage.getItem('pk24_new_task_mode') || 'ai'; } catch (e) { }
+    setTaskCreateMode(savedMode);
+
+    var COLS = typeof window.getProjectColumns === 'function' ? window.getProjectColumns() : [
+      { id: 'backlog', label: 'Backlog' }, { id: 'todo', label: 'To Do' },
+      { id: 'inprogress', label: 'In Progress' }, { id: 'review', label: 'Review' }, { id: 'done', label: 'Done' }
+    ];
+    var meta = document.getElementById('ntm-meta');
+    if (meta) {
+      meta.innerHTML =
+        '<div class="mc"><div class="mc-lbl">Статус</div><select class="status-sel" id="ntm-col">' +
+        COLS.map(function (c) { return '<option value="' + c.id + '"' + (c.id === newTaskCol ? ' selected' : '') + '>' + c.label + '</option>'; }).join('') +
+        '</select></div>' +
+        '<div class="mc"><div class="mc-lbl">Этап</div><select class="status-sel" id="ntm-stage"></select></div>' +
+        '<div class="mc"><div class="mc-lbl">Приоритет</div><select class="status-sel" id="ntm-priority"></select></div>' +
+        '<div class="mc"><div class="mc-lbl">Агент</div><select class="status-sel" id="ntm-agent"></select></div>' +
+        '<div class="mc"><div class="mc-lbl">Размер</div><select class="status-sel" id="ntm-size"></select></div>' +
+        '<div class="mc"><div class="mc-lbl">Часы</div><input type="number" id="ntm-hours" class="ntm-hours" value="8" min="1" max="999" placeholder="ч" inputmode="numeric"></div>' +
+        '<select id="ntm-track" style="display:none" aria-hidden="true"></select>';
+      ensureNtmHiddenOptions();
+      fillManualTaskStageOptions();
+      resetManualTaskForm();
+      var colEl = document.getElementById('ntm-col');
+      if (colEl) colEl.value = newTaskCol;
+      var agentOpts = getNtmAgentOptions();
+      var agentSel = document.getElementById('ntm-agent');
+      if (agentSel) {
+        var currentOpts = Array.from(agentSel.options).map(function (o) { return o.value; });
+        var needRefresh = currentOpts.length !== agentOpts.length || agentOpts.some(function (a, i) { return (currentOpts[i] || '') !== a; });
+        if (needRefresh) {
+          agentSel.innerHTML = '';
+          agentOpts.forEach(function (a) {
+            var o = document.createElement('option');
+            o.value = a;
+            o.textContent = a;
+            agentSel.appendChild(o);
+          });
+        }
+      }
+      if (typeof window.pkDropdownInit === 'function') window.pkDropdownInit(meta);
+      applyFieldColors(ov);
+    }
+
+    setNewTaskMode(savedMode);
+
+    if (savedMode === 'ai') {
+      ntAiHistory = [{ role: 'assistant', content: 'Привет! Я TechLead. Опиши задачу которую нужно добавить.' }];
+      pendingTask = null;
+      var chatEl = document.getElementById('nt-chat');
+      var pv = document.getElementById('task-preview');
+      var btnAdd = document.getElementById('btn-add-backlog');
+      if (chatEl) chatEl.innerHTML = '';
+      if (pv) pv.classList.remove('show');
+      if (btnAdd) btnAdd.disabled = true;
+      if (typeof appendTo === 'function') appendTo('nt-chat', 'ai', 'Привет! Я TechLead. Опиши задачу которую нужно добавить.');
+      if (typeof window.initNtLlmSelectors === 'function') window.initNtLlmSelectors();
+
+      (async function () {
+        if (!activeProjId) return;
+        try {
+          var snap = await apiFetch('/projects/' + activeProjId + '/snapshot');
+          ntSnapshotMd = (snap && snap.snapshot_md) ? snap.snapshot_md : '';
+        } catch (e) {
+          ntSnapshotMd = '';
+        }
+      })();
+
+      setTimeout(function () {
+        var ta = document.getElementById('nt-ta');
+        if (ta) ta.focus();
+      }, 150);
+    } else {
+      var title = document.getElementById('ntm-title');
+      if (title) title.focus();
+    }
+
+    var btnAi = document.getElementById('nt-mode-ai');
+    var btnManual = document.getElementById('nt-mode-manual');
+    if (btnAi) {
+      btnAi.onclick = function () {
+        var titleEl = document.getElementById('ntm-title');
+        var descEl = document.getElementById('ntm-desc');
+        if (titleEl && descEl && (titleEl.value || descEl.value)) {
+          var txt = (titleEl.value || '').trim() + ((titleEl.value && descEl.value) ? '\n' : '') + (descEl.value || '').trim();
+          if (txt && ntAiHistory) {
+            ntAiHistory.push({ role: 'user', content: txt });
+            var chatEl = document.getElementById('nt-chat');
+            if (chatEl && typeof appendTo === 'function') appendTo('nt-chat', 'user', txt);
+          }
+        }
+        setNewTaskMode('ai');
+        try { localStorage.setItem('pk24_new_task_mode', 'ai'); } catch (e) { }
+      };
+    }
+    if (btnManual) {
+      btnManual.onclick = function () {
+        var titleEl = document.getElementById('ntm-title');
+        var descEl = document.getElementById('ntm-desc');
+        if (pendingTask && titleEl && descEl) {
+          titleEl.value = (pendingTask.title || '').trim();
+          descEl.value = (pendingTask.desc || pendingTask.descript || '').trim();
+        }
+        setNewTaskMode('manual');
+        try { localStorage.setItem('pk24_new_task_mode', 'manual'); } catch (e) { }
+      };
+    }
+
+    ov.classList.add('open');
   };
 
-  const originalCloseNewTask = closeNewTask;
-  closeNewTask = function () {
-    originalCloseNewTask();
-    setTaskCreateMode('ai');
+  window.closeTaskCreate = function () {
+    const ov = document.getElementById('task-create-ov');
+    if (ov) {
+      ov.classList.remove('open');
+    }
   };
+
+  // Форма AI-чата остаётся, но +Задача теперь открывает ручную форму.
+  // openNewTask (AI) оставляем без изменений, чтобы не ломать существующее поведение, если оно вызывается из кода.
 
   function getActiveTaskRawId() {
     if (!activeId) {
@@ -6616,6 +8281,11 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
   window.enhanceTaskModal = function (id) {
     ensureTaskDeleteButton();
     ensureTaskEditUI(id);
+    if (typeof window.pkDropdownInit === 'function') {
+      window.pkDropdownInit(document.getElementById('tm-meta'));
+      window.pkDropdownInit(document.getElementById('task-ov'));
+    }
+    if (typeof window.initTcLlmSelectors === 'function') window.initTcLlmSelectors();
     var rawId = getActiveTaskRawId();
     if (rawId) {
       setTimeout(function () {
@@ -6625,9 +8295,8 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
   };
 
   const originalOpenTask = openTask;
-  openTask = function (id) {
-    originalOpenTask(id);
-  };
+  openTask = function (id) { originalOpenTask(id); };
+  window.openTask = openTask;
 
   function populateResponsibleSelect(users, selectedId) {
     const sel = document.getElementById('ps-responsible');
@@ -6649,6 +8318,20 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
     pendingStageActionsByProject.__new__ = [];
     ensureStageSettingsEditor([]);
     syncProjectBudgetInputFromStageRows();
+    ensureAgentSettingsEditor([
+      { name: 'Frontend', type: 'ai', color: '#4a9eff' },
+      { name: 'Backend', type: 'ai', color: '#a78bfa' },
+      { name: 'QA', type: 'ai', color: '#22d3ee' },
+    ]);
+    ensurePriorityOptionsEditor([{ value: 1, label: 'Low' }, { value: 2, label: 'Medium' }, { value: 3, label: 'High' }, { value: 4, label: 'Critical' }]);
+    ensureSizeOptionsEditor([{ id: 'XS', label: 'XS' }, { id: 'S', label: 'S' }, { id: 'M', label: 'M' }, { id: 'L', label: 'L' }, { id: 'XL', label: 'XL' }]);
+    ensureColumnSettingsEditor([
+      { id: 'backlog', label: 'Backlog', visible: true, locked: true },
+      { id: 'todo', label: 'To Do', visible: true, locked: false },
+      { id: 'doing', label: 'In Progress', visible: true, locked: false },
+      { id: 'review', label: 'Review', visible: true, locked: false },
+      { id: 'done', label: 'Done', visible: true, locked: true },
+    ]);
     var wrap = document.getElementById('ps-responsible-wrap');
     if (wrap) wrap.style.display = '';
     var jwt = decodeJwtPayload(localStorage.getItem('pk24_token'));
@@ -6656,7 +8339,8 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
     apiFetch('/api/assignable-users').then(function (data) {
       var users = Array.isArray(data && data.users) ? data.users : [];
       populateResponsibleSelect(users, currentUserId);
-    }).catch(function () { populateResponsibleSelect([], ''); });
+      setTimeout(function () { if (typeof pkDropdownInit === 'function') pkDropdownInit(document.getElementById('ps-ov')); }, 100);
+    }).catch(function () { populateResponsibleSelect([], ''); setTimeout(function () { if (typeof pkDropdownInit === 'function') pkDropdownInit(document.getElementById('ps-ov')); }, 100); });
   };
 
   const originalOpenProjSettings = openProjSettings;
@@ -6670,7 +8354,7 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
       project && Array.isArray(project.stageSettings) && project.stageSettings.length > 0
         ? project.stageSettings
         : project && Array.isArray(project.stages) && project.stages.length > 0
-        ? project.stages.map(function (stageName, index) {
+          ? project.stages.map(function (stageName, index) {
             const budgetShare =
               project.stages.length > 0
                 ? Math.floor(Number(project.budget || 0) / project.stages.length)
@@ -6681,7 +8365,7 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
               color: ensureStageColor(stageName, null),
             };
           })
-        : [];
+          : [];
     let stageSettingsForEditor = stageSettings;
     try {
       const resolved = await ensureTaskStagesPreserved(id, stageSettings);
@@ -6689,7 +8373,7 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
       if (resolved.addedStages.length > 0) {
         showInfo(
           'Добавлены этапы из существующих задач: ' +
-            resolved.addedStages.join(', ')
+          resolved.addedStages.join(', ')
         );
       }
     } catch (error) {
@@ -6698,6 +8382,61 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
 
     ensureStageSettingsEditor(stageSettingsForEditor);
     syncProjectBudgetInputFromStageRows();
+
+    var agentSettingsForEditor = project && Array.isArray(project.agentSettings) && project.agentSettings.length > 0
+      ? project.agentSettings
+      : [];
+    if (agentSettingsForEditor.length === 0 && id === activeProjId && typeof tasks !== 'undefined' && Array.isArray(tasks) && tasks.length > 0) {
+      var agentNames = Array.from(new Set(tasks.map(function (t) { return String(t.agent || '').trim(); }).filter(Boolean)));
+      agentNames = agentNames.filter(function (n) { return n !== 'Без агента'; });
+      var palette = ['#4a9eff', '#a78bfa', '#fb923c', '#f87171', '#4ade80', '#22d3ee', '#f59e0b', '#f472b6'];
+      agentSettingsForEditor = [{ name: 'Без агента', type: 'ai', color: '#6B7280' }].concat(
+        agentNames.map(function (name, idx) {
+          return { name: name, type: 'ai', color: palette[idx % palette.length] };
+        })
+      );
+    }
+    if (agentSettingsForEditor.length === 0) {
+      if (id === '__new__') {
+        agentSettingsForEditor = [
+          { name: 'Без агента', type: 'ai', color: '#6B7280' },
+          { name: 'Frontend', type: 'ai', color: '#4a9eff' },
+          { name: 'Backend', type: 'ai', color: '#a78bfa' },
+          { name: 'QA', type: 'ai', color: '#22d3ee' },
+        ];
+      } else {
+        agentSettingsForEditor = [{ name: 'Без агента', type: 'ai', color: '#6B7280' }];
+      }
+    } else {
+      var hasNone = agentSettingsForEditor.some(function (a) { return (a.name || '').trim() === 'Без агента'; });
+      if (!hasNone) {
+        agentSettingsForEditor = [{ name: 'Без агента', type: 'ai', color: '#6B7280' }].concat(agentSettingsForEditor);
+      } else {
+        agentSettingsForEditor = agentSettingsForEditor.filter(function (a) { return (a.name || '').trim() !== 'Без агента'; });
+        agentSettingsForEditor = [{ name: 'Без агента', type: 'ai', color: '#6B7280' }].concat(agentSettingsForEditor);
+      }
+    }
+    ensureAgentSettingsEditor(agentSettingsForEditor);
+
+    var priorityOpts = project && Array.isArray(project.priorityOptions) && project.priorityOptions.length > 0
+      ? project.priorityOptions
+      : [{ value: 1, label: 'Low' }, { value: 2, label: 'Medium' }, { value: 3, label: 'High' }, { value: 4, label: 'Critical' }];
+    var sizeOpts = project && Array.isArray(project.sizeOptions) && project.sizeOptions.length > 0
+      ? project.sizeOptions
+      : [{ id: 'XS', label: 'XS' }, { id: 'S', label: 'S' }, { id: 'M', label: 'M' }, { id: 'L', label: 'L' }, { id: 'XL', label: 'XL' }];
+    var colOpts = project && Array.isArray(project.columnSettings) && project.columnSettings.length > 0
+      ? project.columnSettings
+      : [
+          { id: 'backlog', label: 'Backlog', visible: true, locked: true },
+          { id: 'todo', label: 'To Do', visible: true, locked: false },
+          { id: 'doing', label: 'In Progress', visible: true, locked: false },
+          { id: 'review', label: 'Review', visible: true, locked: false },
+          { id: 'done', label: 'Done', visible: true, locked: true },
+        ];
+    ensurePriorityOptionsEditor(priorityOpts);
+    ensureSizeOptionsEditor(sizeOpts);
+    ensureColumnSettingsEditor(colOpts);
+
     const deleteButton = document.getElementById('btn-delete-proj');
     if (deleteButton) {
       deleteButton.classList.remove('hidden');
@@ -6714,7 +8453,8 @@ priority: 1=Low, 2=Medium, 3=High, 4=Critical — из любой колонки
         var users = Array.isArray(data && data.users) ? data.users : [];
         var rid = (project && project.responsible_user_id) || '';
         populateResponsibleSelect(users, rid);
-      }).catch(function () { populateResponsibleSelect([], project && project.responsible_user_id); });
+        setTimeout(function () { if (typeof pkDropdownInit === 'function') pkDropdownInit(document.getElementById('ps-ov')); }, 100);
+      }).catch(function () { populateResponsibleSelect([], project && project.responsible_user_id); setTimeout(function () { if (typeof pkDropdownInit === 'function') pkDropdownInit(document.getElementById('ps-ov')); }, 100); });
     }
   };
 
