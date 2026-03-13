@@ -29,12 +29,15 @@ const TASK_TRASH_LIST_DEFAULT_LIMIT = 100;
 const TASK_TRASH_LIST_MAX_LIMIT = 500;
 const TASK_COLUMN_ALIASES = {
   backlog: 'backlog',
+  'back log': 'backlog',
   todo: 'todo',
   'to do': 'todo',
+  'to-do': 'todo',
   doing: 'doing',
   inprogress: 'doing',
   in_progress: 'doing',
   'in progress': 'doing',
+  'in-progress': 'doing',
   review: 'review',
   done: 'done',
 };
@@ -395,6 +398,10 @@ function parseLlmChatPayload(payload) {
   }
 
   parsed.messages = messages;
+
+  if (payload.stream === true) {
+    parsed.stream = true;
+  }
 
   if (payload.params !== undefined) {
     if (!isObjectPayload(payload.params)) {
@@ -884,7 +891,9 @@ async function sendOpenAiCompatibleChat(parsedPayload, resolved, userSetting) {
   const provider = resolved && resolved.provider ? resolved.provider : 'openai';
   const body = { model: resolved.model, messages };
   body[getMaxTokensParamName(provider)] = maxVal;
-  if (params.temperature !== undefined) body.temperature = params.temperature;
+  const modelId = (resolved.model || '').toLowerCase();
+  const noTemperature = modelId.startsWith('o1') || modelId.startsWith('o3') || modelId.startsWith('gpt-5');
+  if (params.temperature !== undefined && !noTemperature) body.temperature = params.temperature;
 
   const url = `${baseUrl}/v1/chat/completions`;
   const headers = {
@@ -962,6 +971,173 @@ async function sendOpenAiCompatibleChat(parsedPayload, resolved, userSetting) {
       statusCode: 502,
     };
   }
+}
+
+function sseLine(data) {
+  return `data: ${JSON.stringify(data)}\n\n`;
+}
+
+async function* streamAnthropicLlm(body, options) {
+  const apiKey = options && options.apiKey ? options.apiKey : null;
+  if (!apiKey || !apiKey.trim()) {
+    throw createAppError(502, 'llm_unavailable', { hint: 'missing_api_key' });
+  }
+  const baseUrlOverride = options && options.baseUrl;
+  const workerUsed = Boolean(CLOUDFLARE_WORKER_URL && !baseUrlOverride);
+  const endpoint = baseUrlOverride
+    ? `${String(baseUrlOverride).replace(/\/+$/, '')}/v1/messages`
+    : workerUsed
+      ? `${CLOUDFLARE_WORKER_URL.replace(/\/+$/, '')}/v1/messages`
+      : 'https://api.anthropic.com/v1/messages';
+
+  const headers = {
+    'content-type': 'application/json',
+    'x-api-key': apiKey,
+  };
+  if (workerUsed) {
+    headers['x-kanban-secret'] = WORKER_SHARED_SECRET || '';
+  } else {
+    headers['anthropic-version'] = ANTHROPIC_API_VERSION;
+  }
+
+  const reqBody = { ...body, stream: true };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000);
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(reqBody),
+    signal: controller.signal,
+  });
+  clearTimeout(timeout);
+
+  if (!response.ok) {
+    const errBody = await readJsonSafely(response);
+    throw createAppError(response.status >= 500 ? 502 : 400, 'llm_unavailable', {
+      hint: 'provider_error',
+      status: response.status,
+      body: errBody,
+    });
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let usage = null;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') continue;
+          try {
+            const obj = JSON.parse(data);
+            if (obj.type === 'content_block_delta' && obj.delta && obj.delta.type === 'text_delta' && typeof obj.delta.text === 'string') {
+              yield { type: 'delta', text: obj.delta.text };
+            } else if (obj.type === 'message_delta' && obj.usage) {
+              usage = obj.usage;
+            }
+          } catch (_) { /* ignore */ }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  yield { type: 'done', usage };
+}
+
+async function* streamOpenAiCompatibleLlm(body, resolved, userSetting) {
+  const apiKey = userSetting && userSetting.api_key && userSetting.api_key.trim();
+  if (!apiKey) {
+    throw createAppError(502, 'llm_unavailable', { hint: 'missing_api_key' });
+  }
+  const baseUrl = getOpenAiCompatibleBaseUrl(resolved.provider, userSetting);
+  if (!baseUrl) {
+    throw createAppError(400, 'invalid_provider_config');
+  }
+
+  const messages = [];
+  for (const m of body.messages || []) {
+    if (m.role === 'system') messages.push({ role: 'system', content: m.content || '' });
+    else messages.push({ role: m.role, content: m.content || '' });
+  }
+  if (messages.length === 0) throw createAppError(400, 'invalid_payload');
+
+  const params = body.params || {};
+  const maxVal = params.max_tokens !== undefined ? params.max_tokens : 1024;
+  const provider = resolved.provider || 'openai';
+  const reqBody = {
+    model: resolved.model,
+    messages,
+    stream: true,
+  };
+  reqBody[getMaxTokensParamName(provider)] = maxVal;
+  const modelId = (resolved.model || '').toLowerCase();
+  const noTemp = modelId.startsWith('o1') || modelId.startsWith('o3') || modelId.startsWith('gpt-5');
+  if (params.temperature !== undefined && !noTemp) reqBody.temperature = params.temperature;
+
+  const url = `${baseUrl}/v1/chat/completions`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(reqBody),
+    signal: controller.signal,
+  });
+  clearTimeout(timeout);
+
+  if (!response.ok) {
+    const errBody = await readJsonSafely(response);
+    let errMsg = errBody && (errBody.error || errBody.message);
+    throw createAppError(response.status >= 500 ? 502 : 400, 'llm_unavailable', {
+      hint: 'provider_error',
+      status: response.status,
+      body: errMsg,
+    });
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let usage = null;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const chunks = buf.split('\n');
+      buf = chunks.pop() || '';
+      for (const chunk of chunks) {
+        if (chunk.startsWith('data: ')) {
+          const data = chunk.slice(6);
+          if (data === '[DONE]') continue;
+          try {
+            const obj = JSON.parse(data);
+            const content = obj.choices?.[0]?.delta?.content;
+            if (typeof content === 'string') yield { type: 'delta', text: content };
+            if (obj.usage) usage = obj.usage;
+          } catch (_) { /* ignore */ }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  yield { type: 'done', usage };
 }
 
 function tryParseJsonBlock(text) {
@@ -2648,12 +2824,53 @@ function normalizeChatActionForApply(action) {
     return action;
   }
   const out = { ...action };
+  // status -> col
+  if (out.status !== undefined && out.col === undefined) {
+    out.col = out.status;
+    delete out.status;
+  }
+  // description -> descript
+  if (out.description !== undefined && out.descript === undefined) {
+    out.descript = out.description;
+    delete out.description;
+  }
+  // col: normalize alias (e.g. "in progress" -> "doing")
+  if (typeof out.col === 'string') {
+    const key = out.col.trim().toLowerCase();
+    const norm = TASK_COLUMN_ALIASES[key] ?? TASK_COLUMN_ALIASES[key.replace(/\s+/g, ' ')];
+    if (norm) out.col = norm;
+  }
+  // priority: string label -> number; drop if unknown
   if (typeof out.priority === 'string') {
     const key = out.priority.trim().toLowerCase();
     const num = PRIORITY_LABELS_TO_NUM[key];
     if (num !== undefined) {
       out.priority = num;
+    } else {
+      const n = Number(out.priority);
+      if (Number.isInteger(n) && n >= 1 && n <= 4) out.priority = n;
+      else delete out.priority;
     }
+  }
+  // hours: string -> number; drop if invalid
+  if (out.hours !== undefined && out.hours !== null && typeof out.hours !== 'number') {
+    const n = Number(out.hours);
+    if (Number.isFinite(n) && n >= 0) {
+      out.hours = n;
+    } else {
+      delete out.hours;
+    }
+  }
+  // agent, track, stage: ensure string or drop
+  for (const k of ['agent', 'track', 'stage']) {
+    if (out[k] !== undefined && out[k] !== null && typeof out[k] !== 'string') {
+      const s = String(out[k]).trim();
+      out[k] = s || null;
+    }
+  }
+  // descript: if object/array, drop (LLM occasionally returns wrong type)
+  if (out.descript !== undefined && out.descript !== null && typeof out.descript !== 'string') {
+    delete out.descript;
   }
   return out;
 }
@@ -3267,23 +3484,29 @@ async function findTaskById(taskId, executor = db) {
   return result.rows[0] || null;
 }
 
-/** Resolve deps.blocks: replace task_code (non-UUID) with task id from same project. */
+/** Resolve deps.blocks: replace task_code or public_id (non-UUID) with task id from same project. */
 async function resolveDepsBlocksForProject(projectId, deps, executor = db) {
   if (!deps || !deps.blocks || !Array.isArray(deps.blocks) || deps.blocks.length === 0) {
     return deps;
   }
   const resolved = [];
   for (const idOrCode of deps.blocks) {
-    const s = typeof idOrCode === 'string' ? idOrCode.trim() : '';
+    const s = typeof idOrCode === 'string' ? idOrCode.trim() : (typeof idOrCode === 'number' ? String(idOrCode) : '');
     if (!s) continue;
     if (isUuid(s)) {
       resolved.push(s);
       continue;
     }
-    const row = await executor.query(
+    let row = await executor.query(
       'SELECT id FROM tasks WHERE project_id = $1 AND task_code = $2 LIMIT 1',
       [projectId, s]
     );
+    if (!row.rows[0] && /^\d+$/.test(s)) {
+      row = await executor.query(
+        'SELECT id FROM tasks WHERE project_id = $1 AND public_id = $2 LIMIT 1',
+        [projectId, parseInt(s, 10)]
+      );
+    }
     if (row.rows[0]) resolved.push(row.rows[0].id);
   }
   return { ...deps, blocks: resolved };
@@ -5724,16 +5947,16 @@ function extractActionFromTechleadResponse(text) {
   if (typeof text !== 'string' || !text.trim()) {
     return { text, action: null };
   }
-  const match = text.match(/\s*ACTION_JSON::\s*(\{[\s\S]*?\})\s*$/);
+  const match = text.match(/\s*ACTION_JSON::\s*([\s\S]*)\s*$/);
   if (!match) {
     return { text: text.trim(), action: null };
   }
-  const raw = match[1];
+  const raw = match[1].trim();
   const action = tryParseJsonBlock(raw);
   if (!action || typeof action !== 'object' || Array.isArray(action)) {
     return { text: text.trim(), action: null };
   }
-  const cleanText = text.replace(/\s*ACTION_JSON::\s*\{[\s\S]*\}\s*$/, '').trim();
+  const cleanText = text.replace(/\s*ACTION_JSON::\s*[\s\S]*\s*$/, '').trim();
   return { text: cleanText, action };
 }
 
@@ -6065,15 +6288,72 @@ app.post('/tasks/:id/chat', async (req, res) => {
       content: r.content,
     }));
 
+    const pr = task.priority ?? 0;
+    const prLabel = (typeof priorityToLabel === 'function' ? priorityToLabel(pr) : String(pr));
     const taskContext =
       `Задача: id=${task.id}, title=${task.title || ''}, col=${task.col || 'backlog'}, ` +
-      `stage=${task.stage || ''}, agent=${task.agent || ''}, priority=${task.priority ?? 0}, ` +
+      `stage=${task.stage || ''}, agent=${task.agent || ''}, priority=${pr} (${prLabel}), ` +
       `hours=${task.hours ?? ''}, descript=${(task.descript || '').slice(0, 1500)}.`;
 
-    const systemPrompt =
-      'Ты технический лид PlanKanban. Отвечай кратко и по делу на русском. ' +
-      'Контекст задачи: ' + taskContext + ' ' +
-      'Если пользователь просит изменить задачу (колонку, этап, приоритет, описание и т.д.), в конце ответа можно предложить изменение в формате: ACTION_JSON::{"field":"value"} с допустимыми полями: title, col, stage, agent, priority, hours, descript, notes. Один объект, без markdown.';
+    let snapshotMd = '';
+    let projectName = '';
+    if (task.project_id) {
+      const projRow = await db.query(
+        'SELECT name, snapshot_md FROM projects WHERE id = $1',
+        [task.project_id]
+      );
+      if (projRow.rows.length) {
+        projectName = projRow.rows[0].name || '';
+        snapshotMd = (projRow.rows[0].snapshot_md || '').slice(0, 8000);
+      }
+    }
+
+    const systemPrompt = `Ты — Senior TechLead в проекте "${projectName || 'без названия'}".
+Работаешь в системе управления задачами PlanKanban. Отвечаешь на языке запроса (если пишут по русски, то отвечаешь по русски, если по английски, то по английски и т.д.
+
+## Твоя роль
+Ты технический советник и ментор команды. Твои задачи:
+- Декомпозиция сложных задач на подзадачи
+- Оценка трудозатрат и рисков
+- Выявление технических зависимостей между задачами
+- Предложение архитектурных решений
+- Code review и улучшение описаний задач
+- Выявление блокеров и неясностей в постановке
+
+## Текущая задача
+${taskContext}
+
+## Снапшот проекта (все задачи и зависимости)
+${snapshotMd || 'Снапшот недоступен'}
+
+## Правила ответа
+1. Отвечай кратко и конкретно — без воды и общих фраз
+2. Если задача неясна — задай ОДИН уточняющий вопрос
+3. Если видишь риск или блокер — обозначь явно: "⚠️ Риск:" или "🔒 Блокер:"
+4. Если задача зависит от другой — укажи явно с ID: "Зависит от T-000XXX"
+5. При декомпозиции — нумеруй подзадачи, указывай этап и оценку в часах
+6. Не повторяй условие задачи обратно пользователю
+
+## Изменение задачи
+Если пользователь просит изменить задачу — в конце ответа добавь строку:
+ACTION_JSON::{"field":"value"}
+Допустимые поля: title, col, stage, agent, priority, hours, descript, notes
+Значения col: backlog, todo, inprogress, review, done
+Приоритет — число 1–4: 1=Low, 2=Medium, 3=High, 4=Critical. «Повысить» = увеличить число (2→3), «понизить» = уменьшить (3→2).
+Один объект, без markdown, без пояснений после.
+
+## Декомпозиция на подзадачи
+Если пользователь просит разложить задачу на подзадачи и создать новые задачи:
+ACTION_JSON::{"subtasks":[{"title":"Название подзадачи","stage":"Этап","hours":8},{"title":"...","stage":"...","hours":6}],"subtask_deps":{"2":[1],"3":[1]}}
+- subtasks: массив объектов, каждый — {title (обязательно), stage?, hours?, size?, agent?, descript?}
+- subtask_deps: необязательно. Ключи — номера подзадач (1-based). Значения — массивы номеров, от которых зависит эта подзадача. Пример: "2":[1] — подзадача 2 зависит от 1; "3":[1] — подзадача 3 зависит от 1.
+
+## Чего НЕ делать
+- Не придумывать технологии не упомянутые в задаче
+- Не предлагать изменения если пользователь просто спрашивает
+- Не отвечать на вопросы НЕ связанные с задачей, проектом или разработкой ПО
+- Если вопрос не по работе — ответь одной из этих фраз (выбери случайно): "Это не по моей части — чем могу помочь по работе?" / "Не мой профиль. Что делаем дальше?" / "Мимо кассы. Давай по делу?" / "Это к другому специалисту. У нас что-то в работе?" / "Не в моей компетенции. Что стоит в очереди?" / "Пас. Чем могу помочь реально?" / "Не та область. Что на повестке?" / "Это не ко мне. Что нужно сделать?" / "Выходит за рамки моих задач. Что планируем?" / "Не моя тема. Чем займёмся?" Ничего не добавляй к фразе.
+- Не задавать уточняющих вопросов по посторонним темам — это трактуется как согласие обсуждать их`;
 
     let llmText;
     try {
@@ -6169,14 +6449,158 @@ app.post('/tasks/:id/chat/apply/:messageId', async (req, res) => {
 
     const action = row.action;
     if (!action || typeof action !== 'object' || Array.isArray(action)) {
-      sendJson(res, 400, { error: 'invalid_payload' });
+      sendJson(res, 400, {
+        error: 'invalid_payload',
+        message: 'Запрос ещё раз оформить задачу — предыдущий ответ ассистента не содержит применимых изменений.',
+      });
       return;
     }
 
-    const normalizedAction = normalizeChatActionForApply(action);
+    const rawSubtasks =
+      action.subtasks ||
+      action.create_subtasks ||
+      action.tasks ||
+      action.new_tasks ||
+      action.subtask_list;
+    const subtasks = Array.isArray(rawSubtasks) ? rawSubtasks : null;
+    const subtaskDeps =
+      action.subtask_deps && typeof action.subtask_deps === 'object' && !Array.isArray(action.subtask_deps)
+        ? action.subtask_deps
+        : null;
+
+    if (subtasks && subtasks.length > 0) {
+      const before = await findTaskById(taskId);
+      if (!before) {
+        sendJson(res, 404, { error: 'task_not_found' });
+        return;
+      }
+      const projectId = before.project_id;
+      const createdTaskIds = [];
+      const createdTasks = await runInTransaction(async (tx) => {
+        for (let i = 0; i < subtasks.length; i++) {
+          const st = subtasks[i];
+          if (!st || typeof st !== 'object') continue;
+          const title = (typeof st.title === 'string' ? st.title.trim() : '') ||
+            (typeof st.name === 'string' ? st.name.trim() : '') ||
+            (typeof st.task === 'string' ? st.task.trim() : '');
+          if (!title) continue;
+          const createPayload = {
+            title,
+            col: st.col || 'backlog',
+            stage: st.stage != null ? String(st.stage).trim() : before.stage || NO_STAGE,
+            hours: typeof st.hours === 'number' && st.hours >= 0 ? st.hours : (typeof st.hours === 'string' ? parseInt(st.hours, 10) : null) || 8,
+            agent: st.agent != null ? String(st.agent).trim() : before.agent || null,
+            size: st.size && ['XS', 'S', 'M', 'L', 'XL'].includes(String(st.size).trim().toUpperCase()) ? String(st.size).trim().toUpperCase() : 'M',
+            priority: Number.isInteger(st.priority) && st.priority >= 1 && st.priority <= 4 ? st.priority : 2,
+          };
+          const parsed = parseTaskCreatePayload(createPayload);
+          if (parsed.error) continue;
+          const payload = parsed.value;
+          const targetCol = payload.col || 'backlog';
+          const nextPosition = await getNextTaskPosition(projectId, targetCol, tx);
+          const stageVal = (payload.stage && String(payload.stage).trim()) || NO_STAGE;
+          const sizeVal = payload.size && ['XS', 'S', 'M', 'L', 'XL'].includes(String(payload.size).toUpperCase()) ? String(payload.size).toUpperCase() : 'M';
+          const created = await tx.query(
+            `
+            INSERT INTO tasks (project_id, title, task_code, col, position, stage, agent, priority, hours, size, descript, notes, deps)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            RETURNING id, public_id, project_id, title, task_code, col, stage, assignee_user_id, track, agent,
+                      priority, hours, size, descript, notes, deps, position, created_at, updated_at
+            `,
+            [
+              projectId,
+              payload.title,
+              payload.task_code ?? null,
+              targetCol,
+              nextPosition,
+              stageVal,
+              payload.agent ?? null,
+              payload.priority ?? 2,
+              payload.hours ?? 8,
+              sizeVal,
+              (typeof st.descript === 'string' ? st.descript.trim() : null) || null,
+              null,
+              null,
+            ]
+          );
+          const createdTask = created.rows[0];
+          createdTaskIds.push(createdTask.id);
+          await writeTaskEvent(
+            {
+              projectId,
+              taskId: createdTask.id,
+              actorUserId: user.id,
+              eventType: 'task_created',
+              action: 'create',
+              before: {},
+              after: createdTask,
+              payload: { title: createdTask.title, stage: stageVal, col: targetCol, source: 'task_chat_apply_subtasks' },
+            },
+            tx
+          );
+        }
+        if (subtaskDeps && createdTaskIds.length > 0) {
+          for (const key of Object.keys(subtaskDeps)) {
+            const depIdx = parseInt(key, 10);
+            if (!Number.isInteger(depIdx) || depIdx < 1 || depIdx > createdTaskIds.length) continue;
+            const depsOn = subtaskDeps[key];
+            const depsArr = Array.isArray(depsOn) ? depsOn : [depsOn];
+            const blockIds = [];
+            for (const idx of depsArr) {
+              const i = parseInt(idx, 10);
+              if (Number.isInteger(i) && i >= 1 && i <= createdTaskIds.length) {
+                blockIds.push(createdTaskIds[i - 1]);
+              }
+            }
+            if (blockIds.length === 0) continue;
+            const taskIdToUpdate = createdTaskIds[depIdx - 1];
+            await tx.query(
+              `UPDATE tasks SET deps = $1::jsonb WHERE id = $2`,
+              [JSON.stringify({ blocks: blockIds }), taskIdToUpdate]
+            );
+          }
+        }
+        await tx.query(
+          `UPDATE task_chats SET action_applied = true WHERE id = $1 AND task_id = $2`,
+          [messageId, taskId]
+        );
+        return { created: createdTaskIds.length, task_ids: createdTaskIds };
+      });
+      generateProjectSnapshot(projectId).catch((err) => console.error('[snapshot] failed:', err.message));
+      sendJson(res, 200, { task: before, created_count: createdTasks.created, created_task_ids: createdTasks.task_ids });
+      return;
+    }
+    if (rawSubtasks && Array.isArray(rawSubtasks) && rawSubtasks.length === 0) {
+      await db.query(
+        `UPDATE task_chats SET action_applied = true WHERE id = $1 AND task_id = $2`,
+        [messageId, taskId]
+      );
+      const before = await findTaskById(taskId);
+      sendJson(res, 200, { task: before || null, created_count: 0, created_task_ids: [] });
+      return;
+    }
+
+    const patchOnly = { ...action };
+    delete patchOnly.subtasks;
+    delete patchOnly.create_subtasks;
+    delete patchOnly.tasks;
+    delete patchOnly.new_tasks;
+    delete patchOnly.subtask_list;
+    delete patchOnly.subtask_deps;
+    const normalizedAction = normalizeChatActionForApply(patchOnly);
     const parsed = parseTaskPatchPayload(normalizedAction);
     if (parsed.error) {
-      sendJson(res, 400, { error: parsed.error });
+      if (isDevelopment()) {
+        console.warn('[chat/apply] invalid_payload:', {
+          raw: action,
+          normalized: normalizedAction,
+          error: parsed.error,
+        });
+      }
+      sendJson(res, 400, {
+        error: parsed.error,
+        message: parsed.error === 'invalid_payload' ? 'patch_validation_failed' : parsed.error,
+      });
       return;
     }
 
@@ -6701,9 +7125,12 @@ app.post('/tasks/:id/move', async (req, res) => {
       }
 
       const targetCol = parsed.value.col;
-      const movingToInProgress = targetCol === 'doing' || targetCol === 'todo';
-      if (movingToInProgress && before.deps && before.deps.blocks && Array.isArray(before.deps.blocks) && before.deps.blocks.length > 0) {
-        const blockIds = before.deps.blocks.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim());
+      const movingForward = targetCol !== 'backlog';
+      if (movingForward && before.deps && before.deps.blocks && Array.isArray(before.deps.blocks) && before.deps.blocks.length > 0) {
+        const resolvedDeps = await resolveDepsBlocksForProject(before.project_id, before.deps, tx);
+        const blockIds = (resolvedDeps && resolvedDeps.blocks || [])
+          .filter((x) => typeof x === 'string' && isUuid(x.trim()))
+          .map((x) => x.trim());
         if (blockIds.length > 0) {
           const notDone = await tx.query(
             `
@@ -6714,7 +7141,7 @@ app.post('/tasks/:id/move', async (req, res) => {
           );
           if (notDone.rows.length > 0) {
             const codes = notDone.rows.map((r) => r.task_code || r.id).join(', ');
-            throw createAppError(409, 'task_blocked_by_deps', { message: `Задача заблокирована: выполните зависимости (${codes})` });
+            throw createAppError(409, 'task_blocked_by_deps', { message: `Задача заблокирована: выполните зависимости (${codes}). Разрешён только откат в Backlog.` });
           }
         }
       }
@@ -8890,6 +9317,112 @@ app.post('/api/llm/chat', async (req, res) => {
   const provider = resolved.value.provider;
   const startedAt = Date.now();
   const messageMeta = getLlmMessageMeta(parsed.value.messages);
+
+  if (parsed.value.stream === true) {
+    if (!(userSetting && userSetting.api_key)) {
+      sendJson(res, 502, { error: 'llm_unavailable', hint: 'missing_api_key' });
+      return;
+    }
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders && res.flushHeaders();
+
+    let fullText = '';
+    let lastUsage = null;
+    let streamErr = null;
+
+    try {
+      if (provider === 'anthropic') {
+        const anthropicRequest = buildAnthropicRequest(parsed.value, resolved.value.model);
+        if (anthropicRequest.error) {
+          res.write(sseLine({ type: 'error', error: anthropicRequest.error }));
+          res.end();
+          return;
+        }
+        const requestOptions = {
+          apiKey: userSetting.api_key,
+          baseUrl: userSetting.base_url || undefined,
+        };
+        for await (const ev of streamAnthropicLlm(anthropicRequest.value, requestOptions)) {
+          if (ev.type === 'delta' && ev.text) {
+            fullText += ev.text;
+            res.write(sseLine({ type: 'delta', text: ev.text }));
+          } else if (ev.type === 'done' && ev.usage) {
+            lastUsage = ev.usage;
+          }
+        }
+      } else {
+        const openAiBody = {
+          messages: parsed.value.messages,
+          params: parsed.value.params || {},
+        };
+        for await (const ev of streamOpenAiCompatibleLlm(openAiBody, resolved.value, userSetting)) {
+          if (ev.type === 'delta' && ev.text) {
+            fullText += ev.text;
+            res.write(sseLine({ type: 'delta', text: ev.text }));
+          } else if (ev.type === 'done' && ev.usage) {
+            lastUsage = ev.usage;
+          }
+        }
+      }
+    } catch (err) {
+      streamErr = err;
+      const hint = isAppError(err) ? (err.hint || 'provider_error') : 'provider_error';
+      res.write(sseLine({ type: 'error', error: 'llm_unavailable', hint }));
+    }
+
+    const inputTokens = lastUsage
+      ? (Number.isInteger(lastUsage.input_tokens) ? lastUsage.input_tokens : Number.isInteger(lastUsage.prompt_tokens) ? lastUsage.prompt_tokens : null)
+      : null;
+    const outputTokens = lastUsage
+      ? (Number.isInteger(lastUsage.output_tokens) ? lastUsage.output_tokens : Number.isInteger(lastUsage.completion_tokens) ? lastUsage.completion_tokens : null)
+      : null;
+    const costEstimateUsd = estimateLlmCostUsd(provider, resolved.value.model, inputTokens, outputTokens || 0);
+
+    let requestId = null;
+    if (!streamErr) {
+      try {
+        requestId = await writeLlmRequest({
+          projectId: parsed.value.project_id || null,
+          actorUserId: user.id,
+          purpose: parsed.value.purpose,
+          provider,
+          model: resolved.value.model,
+          requestMeta: { ...messageMeta, params: parsed.value.params || {}, worker_used: false },
+          responseMeta: {
+            worker_used: false,
+            latency_ms: Date.now() - startedAt,
+            provider_http_status: 200,
+            response_id: null,
+            stop_reason: null,
+          },
+          inputTokens,
+          outputTokens,
+          costEstimateUsd,
+          status: 'ok',
+          errorCode: null,
+        });
+      } catch (auditErr) {
+        console.error('LLM stream audit write failed:', auditErr.message);
+      }
+    }
+
+    const usage = {};
+    if (inputTokens != null) usage.input_tokens = inputTokens;
+    if (outputTokens != null) usage.output_tokens = outputTokens;
+    res.write(sseLine({
+      type: 'done',
+      text: fullText,
+      provider,
+      model: resolved.value.model,
+      usage,
+      request_id: requestId,
+    }));
+    res.end();
+    return;
+  }
 
   if (provider !== 'anthropic') {
     const openAiResult = await sendOpenAiCompatibleChat(parsed.value, resolved.value, userSetting);

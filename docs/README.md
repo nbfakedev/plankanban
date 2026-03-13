@@ -33,3 +33,4 @@
 | [GITHUB.md](GITHUB.md) | Работа с GitHub |
 | [KNOWLEDGE_BASES.md](KNOWLEDGE_BASES.md) | Базы знаний для агентов |
 | [adr/](adr/) | Architecture Decision Records |
+| `.archive/patches/` | Исторические патчи (уже применены) |

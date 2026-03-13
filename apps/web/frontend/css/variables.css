@@ -1,0 +1,82 @@
+:root {
+  --gold: #f0a500;
+  --gold2: #ffc235;
+  --gold-glow: rgba(240, 165, 0, .3);
+  --gold-dim: rgba(240, 165, 0, .12);
+  --c-A: #4a9eff;
+  --c-R1: #a78bfa;
+  --c-R11: #fb923c;
+  --c-R2: #f87171;
+  --c-R3: #4ade80;
+  --c-F: #22d3ee;
+  --green: #4ade80;
+  --yellow: #fbbf24;
+  --red: #f87171;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #080b12;
+  --bg2: #0e1420;
+  --sf: rgba(255, 255, 255, .04);
+  --sf2: rgba(255, 255, 255, .07);
+  --sf3: rgba(255, 255, 255, .12);
+  --bd: rgba(255, 255, 255, .08);
+  --bd2: rgba(255, 255, 255, .14);
+  --bd3: rgba(255, 255, 255, .22);
+  --tx: #f0ede8;
+  --tx2: #9ca8c2;
+  --tx3: #525d75;
+  --tx4: #363f52;
+  --sh: 0 4px 24px rgba(0, 0, 0, .5);
+  --sh-lg: 0 20px 70px rgba(0, 0, 0, .75);
+  --hbg: rgba(8, 11, 18, .93);
+  --mbg: rgba(10, 14, 22, .97);
+  --scr: rgba(255, 255, 255, .08);
+  --dd-bg: #131b2a;
+  --dd-bg2: #101723;
+  --dd-tx: #eaf0ff;
+  --dd-muted: #9aa8c6;
+  --dd-active: #1f66cf;
+  --pk-dd-trigger-bg: rgba(255, 255, 255, .07);
+  --pk-dd-trigger-border: rgba(255, 255, 255, .14);
+  --pk-dd-trigger-hover: rgba(255, 255, 255, .12);
+  --pk-dd-menu-bg: #131b2a;
+  --pk-dd-menu-border: rgba(255, 255, 255, .14);
+  --pk-dd-option-hover: #101723;
+  --pk-dd-option-selected: rgba(240, 165, 0, .2);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #eef0f7;
+  --bg2: #e4e7f2;
+  --sf: rgba(255, 255, 255, .82);
+  --sf2: rgba(255, 255, 255, .96);
+  --sf3: #fff;
+  --bd: rgba(0, 0, 0, .09);
+  --bd2: rgba(0, 0, 0, .15);
+  --bd3: rgba(0, 0, 0, .23);
+  --tx: #1a1f2e;
+  --tx2: #4a556a;
+  --tx3: #8a97b0;
+  --tx4: #b0bdd0;
+  --sh: 0 4px 20px rgba(0, 0, 0, .08);
+  --sh-lg: 0 16px 48px rgba(0, 0, 0, .14);
+  --hbg: rgba(238, 240, 247, .95);
+  --mbg: rgba(244, 246, 252, .99);
+  --scr: rgba(0, 0, 0, .12);
+  --dd-bg: #f8faff;
+  --dd-bg2: #eef3ff;
+  --dd-tx: #162035;
+  --dd-muted: #4f5d77;
+  --dd-active: #2c6edb;
+  --pk-dd-trigger-bg: rgba(255, 255, 255, .96);
+  --pk-dd-trigger-border: rgba(0, 0, 0, .15);
+  --pk-dd-trigger-hover: rgba(0, 0, 0, .06);
+  --pk-dd-menu-bg: #ffffff;
+  --pk-dd-menu-border: rgba(0, 0, 0, .12);
+  --pk-dd-option-hover: #f1f5f9;
+  --pk-dd-option-selected: rgba(240, 165, 0, .12);
+}
+

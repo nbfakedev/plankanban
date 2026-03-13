@@ -904,6 +904,7 @@ POST `/api/llm/chat`
 {
   "purpose": "chat",
   "project_id": "uuid-optional",
+  "stream": false,
   "provider": "anthropic",
   "model": "claude-sonnet-4",
   "messages": [
@@ -935,6 +936,12 @@ POST `/api/llm/chat`
 - 429: `{ "error": "rate_limited" }`
 - 502: `{ "error": "llm_unavailable" }`
 - 500: `{ "error": "internal_error" }`
+
+When `stream: true`, the response is `Content-Type: text/event-stream` with SSE events:
+- `data: {"type":"delta","text":"..."}` — text chunks (provider-agnostic)
+- `data: {"type":"done","text":"full text","provider":"...","model":"...","usage":{...},"request_id":"uuid"}` — final event
+
+If the provider does not support streaming, the server falls back to a regular JSON response.
 
 GET `/api/llm/models?provider=anthropic`
 - roles: any authenticated role
